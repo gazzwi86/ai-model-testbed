@@ -12,22 +12,26 @@ fi
 OLLAMA_VERSION=$(ollama --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
 echo "Ollama version: $OLLAMA_VERSION"
 
-# 2. Check Python
-PYTHON_VERSION=$(python3 --version 2>&1)
-echo "Python: $PYTHON_VERSION"
+# 2. Check uv
+if ! command -v uv &> /dev/null; then
+    echo "ERROR: uv not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    exit 1
+fi
 
-# 3. Create venv if needed
+echo "uv version: $(uv --version)"
+
+# 3. Create venv with pinned Python and install deps
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 if [ ! -d "$PROJECT_DIR/.venv" ]; then
-    echo "Creating virtual environment..."
-    python3 -m venv "$PROJECT_DIR/.venv"
+    echo "Creating virtual environment (Python 3.12)..."
+    uv venv --python 3.12 "$PROJECT_DIR/.venv"
 fi
 
 source "$PROJECT_DIR/.venv/bin/activate"
 echo "Installing dependencies..."
-pip install -r "$PROJECT_DIR/requirements.txt" --quiet
+uv pip install -e "$PROJECT_DIR"
 
 # 4. Check ANTHROPIC_API_KEY
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then

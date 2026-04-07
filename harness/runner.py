@@ -8,6 +8,7 @@ Usage:
   python -m harness.runner --mdap-only                # MDAP tests only
   python -m harness.runner --local-only               # Skip frontier models
   python -m harness.runner --frontier-only             # Skip local models
+  python -m harness.runner --resume                   # Skip existing results
 """
 
 import argparse
@@ -28,6 +29,17 @@ from .metrics import metrics_from_ollama, metrics_from_claude
 from .paths import PROMPTS_DIR, RAW_RESULTS_DIR
 
 logger = logging.getLogger(__name__)
+
+
+def _result_prefix(category: str, tier: str, model_id: str, run_idx: int) -> str:
+    """Return the deterministic prefix of a result filename (without timestamp)."""
+    return f"{category}_{tier}_{model_id.replace(':', '_')}_run{run_idx}_"
+
+
+def _result_exists(category: str, tier: str, model_id: str, run_idx: int) -> bool:
+    """Check whether a result file already exists for this test run."""
+    prefix = _result_prefix(category, tier, model_id, run_idx)
+    return any(RAW_RESULTS_DIR.glob(f"{prefix}*.json"))
 
 
 def load_prompts(
@@ -185,6 +197,7 @@ async def run_all(args: argparse.Namespace) -> None:
     ollama = OllamaClient(config.ollama_base_url)
     claude = ClaudeClient()
     completed_count = 0
+    skipped_count = 0
 
     # Determine which models to run
     local_models = config.local_models
@@ -202,10 +215,30 @@ async def run_all(args: argparse.Namespace) -> None:
     # Run local models
     for model in local_models:
         logger.info("=== Testing %s ===", model.name)
+
+        # Log currently loaded models (memory check)
+        loaded = await ollama.list_running()
+        if loaded:
+            names = [m.get("name", "") for m in loaded]
+            logger.info("Models currently in memory: %s", ", ".join(names))
+
         await ensure_capacity(ollama, model)
 
         for prompt in prompts:
             for run_idx in range(config.test_params.runs_per_test):
+                # --resume: skip if result already exists
+                if args.resume and _result_exists(
+                    prompt["category"], prompt["tier"], model.id, run_idx
+                ):
+                    skipped_count += 1
+                    logger.info(
+                        "  SKIP %s/%s run %d (result exists)",
+                        prompt["category"],
+                        prompt["tier"],
+                        run_idx + 1,
+                    )
+                    continue
+
                 logger.info(
                     "  %s/%s run %d/%d",
                     prompt["category"],
@@ -223,12 +256,29 @@ async def run_all(args: argparse.Namespace) -> None:
                 except Exception as e:
                     logger.error("    FAILED: %s", e)
 
+        # Explicitly unload the model after its tests complete
+        logger.info("Unloading %s after tests", model.id)
+        await ollama.unload(model.id)
+
     # Run frontier models
     for model in frontier_models:
         logger.info("=== Testing %s ===", model.name)
 
         for prompt in prompts:
             for run_idx in range(config.test_params.runs_per_test):
+                # --resume: skip if result already exists
+                if args.resume and _result_exists(
+                    prompt["category"], prompt["tier"], model.id, run_idx
+                ):
+                    skipped_count += 1
+                    logger.info(
+                        "  SKIP %s/%s run %d (result exists)",
+                        prompt["category"],
+                        prompt["tier"],
+                        run_idx + 1,
+                    )
+                    continue
+
                 logger.info(
                     "  %s/%s run %d/%d",
                     prompt["category"],
@@ -247,7 +297,9 @@ async def run_all(args: argparse.Namespace) -> None:
                     logger.error("    FAILED: %s", e)
 
     await ollama.close()
-    logger.info("Completed %d test runs", completed_count)
+    logger.info(
+        "Completed %d test runs (%d skipped via --resume)", completed_count, skipped_count
+    )
 
 
 def main():
@@ -258,6 +310,11 @@ def main():
     parser.add_argument("--mdap-only", action="store_true", help="Run MDAP tests only")
     parser.add_argument("--local-only", action="store_true", help="Skip frontier models")
     parser.add_argument("--frontier-only", action="store_true", help="Skip local models")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip tests whose result files already exist in results/raw/",
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
