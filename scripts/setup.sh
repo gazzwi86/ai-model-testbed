@@ -47,7 +47,7 @@ MODELS=(
     "qwen3.5:27b"
     "deepseek-r1:14b"
     "deepseek-coder:6.7b"
-    "mistral:7b"
+    "mistral-small3.2"
 )
 
 for model in "${MODELS[@]}"; do

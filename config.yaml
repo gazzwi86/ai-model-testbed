@@ -62,13 +62,13 @@ models:
       num_ctx: 16384
       notes: "Coding specialist. Fast."
 
-    - id: "mistral:7b"
-      name: "Mistral 7B"
-      params: "7B"
-      active_params: "7B"
-      size_gb: 4.4
-      num_ctx: 16384
-      notes: "Fast, good instruction following."
+    - id: "mistral-small3.2"
+      name: "Mistral Small 3.2"
+      params: "24B"
+      active_params: "24B"
+      size_gb: 15
+      num_ctx: 8192
+      notes: "Latest Mistral Small. Strong instruction following."
 
   frontier:
     - id: "claude-haiku-4-5-20251001"
