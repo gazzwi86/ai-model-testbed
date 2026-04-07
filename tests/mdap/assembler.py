@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -95,7 +96,7 @@ def run_integration_tests(
 
         try:
             result = subprocess.run(
-                ["python", "-m", "pytest", str(test_path), "-v", "--tb=short"],
+                [sys.executable, "-m", "pytest", str(test_path), "-v", "--tb=short"],
                 capture_output=True,
                 text=True,
                 timeout=30,

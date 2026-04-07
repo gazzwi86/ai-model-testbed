@@ -16,6 +16,7 @@ import ast
 import logging
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -55,7 +56,7 @@ def _score_correctness(code: str, test_file: str | None) -> float:
 
         result = subprocess.run(
             [
-                "python", "-m", "pytest",
+                sys.executable, "-m", "pytest",
                 str(test_path),
                 "-v",
                 "--tb=short",
@@ -155,7 +156,7 @@ def _score_style(code: str) -> float:
     has_docstring = any(
         (fn.body
          and isinstance(fn.body[0], ast.Expr)
-         and isinstance(fn.body[0].value, (ast.Constant, ast.Str)))
+         and isinstance(fn.body[0].value, ast.Constant))
         for fn in functions
     )
     if has_docstring:

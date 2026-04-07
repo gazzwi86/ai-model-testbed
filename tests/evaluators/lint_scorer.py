@@ -10,11 +10,22 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _find_tool(name: str) -> str:
+    """Find a CLI tool, preferring the venv's bin directory."""
+    venv_bin = Path(sys.executable).parent / name
+    if venv_bin.exists():
+        return str(venv_bin)
+    found = shutil.which(name)
+    return found or name
 
 # Each ruff violation costs this many points out of 100.
 RUFF_VIOLATION_WEIGHT = 5.0
@@ -34,7 +45,7 @@ def _run_ruff(filepath: Path) -> int:
     """Run ruff check on *filepath* and return the number of violations."""
     try:
         result = subprocess.run(
-            ["ruff", "check", "--output-format=json", str(filepath)],
+            [_find_tool("ruff"), "check", "--output-format=json", str(filepath)],
             capture_output=True,
             text=True,
             timeout=30,
@@ -57,7 +68,7 @@ def _run_pylint(filepath: Path) -> float:
     try:
         result = subprocess.run(
             [
-                "pylint",
+                _find_tool("pylint"),
                 "--output-format=json",
                 "--disable=C0114,C0115,C0116",  # don't penalise missing module/class docstrings twice
                 str(filepath),

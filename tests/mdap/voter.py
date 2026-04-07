@@ -8,6 +8,7 @@ Three strategies:
 
 import logging
 import subprocess
+import sys
 import tempfile
 import textwrap
 from pathlib import Path
@@ -56,7 +57,7 @@ def _run_tests(code: str, test_assertions: list[str]) -> list[bool]:
         script_path.write_text(test_script)
         try:
             result = subprocess.run(
-                ["python", str(script_path)],
+                [sys.executable, str(script_path)],
                 capture_output=True,
                 text=True,
                 timeout=30,
