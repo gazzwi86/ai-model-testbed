@@ -1,0 +1,126 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Weather Forecast API",
+    "version": "1.0.0",
+    "description": "A simple weather forecast service that returns forecast data for a given city."
+  },
+  "servers": [
+    {
+      "url": "https://api.weather-fixture.example.com/v1"
+    }
+  ],
+  "paths": {
+    "/forecast": {
+      "get": {
+        "operationId": "get_forecast",
+        "summary": "Get weather forecast for a city",
+        "description": "Returns a multi-day weather forecast including temperature, humidity, precipitation probability, and conditions for each day.",
+        "parameters": [
+          {
+            "name": "city",
+            "in": "query",
+            "required": true,
+            "description": "City name (e.g., 'London', 'New York', 'Tokyo'). Must be a valid city name.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "description": "Number of forecast days to return. Defaults to 5. Maximum 7.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 7,
+              "default": 5
+            }
+          },
+          {
+            "name": "units",
+            "in": "query",
+            "required": false,
+            "description": "Temperature units: 'metric' (Celsius) or 'imperial' (Fahrenheit).",
+            "schema": {
+              "type": "string",
+              "enum": ["metric", "imperial"],
+              "default": "metric"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful forecast response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "city": {
+                      "type": "string",
+                      "description": "The resolved city name"
+                    },
+                    "country": {
+                      "type": "string",
+                      "description": "ISO 3166-1 alpha-2 country code"
+                    },
+                    "forecast": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "Forecast date (YYYY-MM-DD)"
+                          },
+                          "high": {
+                            "type": "number",
+                            "description": "High temperature for the day"
+                          },
+                          "low": {
+                            "type": "number",
+                            "description": "Low temperature for the day"
+                          },
+                          "humidity": {
+                            "type": "integer",
+                            "description": "Relative humidity percentage (0-100)"
+                          },
+                          "precipitation_chance": {
+                            "type": "integer",
+                            "description": "Probability of precipitation (0-100)"
+                          },
+                          "conditions": {
+                            "type": "string",
+                            "enum": ["sunny", "partly_cloudy", "cloudy", "rainy", "stormy", "snowy", "foggy"],
+                            "description": "Overall weather conditions"
+                          },
+                          "wind_speed": {
+                            "type": "number",
+                            "description": "Wind speed in km/h (metric) or mph (imperial)"
+                          }
+                        },
+                        "required": ["date", "high", "low", "conditions"]
+                      }
+                    }
+                  },
+                  "required": ["city", "forecast"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (e.g., city not found, invalid days parameter)"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    }
+  }
+}

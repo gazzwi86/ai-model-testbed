@@ -1,0 +1,22 @@
+[
+  "PayStream replaces the monolithic PayGate v3 payment gateway, targeting 50,000 TPS sustained (burst to 80,000) with sub-second domestic payment latency (p99 < 800ms).",
+  "The system uses a hybrid communication model: synchronous gRPC for the merchant-facing authorisation path and asynchronous Kafka events for downstream processing (settlement, ledger, notifications).",
+  "A fully synchronous architecture was rejected due to fragile dependency chains at scale; a fully asynchronous merchant API was rejected because merchants expect synchronous authorisation responses.",
+  "The payment lifecycle uses an orchestration-based saga pattern via the Payment Orchestrator, chosen over choreography due to the complex branching in payment flows (partial captures, split refunds, chargebacks).",
+  "Cardholder data is isolated in a dedicated Card Vault service running in a separate PCI-scoped network segment, reducing PCI DSS audit scope to just the Vault and API Gateway TLS termination.",
+  "Each service owns its own database (database-per-service pattern); the Ledger uses PostgreSQL with serialisable isolation for double-entry accounting integrity.",
+  "Event sourcing was considered but rejected for the Ledger in favour of traditional double-entry accounting models, which are better understood by the team.",
+  "Downstream services are eventually consistent with authorisation decisions, with up to 5 seconds of lag accepted as a trade-off.",
+  "The migration from PayGate v3 follows a strangler-fig pattern over 12 months in 4 phases, starting with 5% domestic traffic routing to PayStream.",
+  "Rollback to PayGate v3 is possible within 5 minutes at each migration phase via API Gateway feature flags, with data consistency maintained through a shared Kafka event log.",
+  "The Card Vault is a critical single-primary dependency; a primary failure blocks new card authorisations. Mitigation is automatic failover with a warm standby (RTO: 30 seconds).",
+  "The FX Service caches exchange rates with a 60-second TTL, creating a staleness risk during high-volatility periods. Mitigation is reducing TTL to 15 seconds when rate-of-change monitoring triggers.",
+  "The team has limited Kafka operational experience, identified as a medium-likelihood, high-impact risk. Mitigation is engaging a specialist consultant for 6 months.",
+  "Migrating 7 years of PayGate v3 transaction history to the new Ledger is risky due to data format differences. Mitigation is running parallel ledgers for 3 months with daily reconciliation.",
+  "The authorisation latency budget is 750ms at p99, with the acquiring bank round-trip (via Card Vault) consuming the largest share at 500ms.",
+  "Kafka topics are partitioned by merchant_id to preserve per-merchant ordering, starting at 120 partitions with a scale-out plan to 240.",
+  "Security measures include mTLS between all services, TLS 1.3 externally, AES-256 at rest, HSM-managed keys for the Card Vault, and 24-hour certificate rotation.",
+  "The technology stack spans Go (Orchestrator, Card Vault, FX), Python (Fraud Engine ML), and Java (Ledger), running on Kubernetes (EKS) with Terraform and ArgoCD.",
+  "Cryptocurrency support and physical point-of-sale integration are explicitly out of scope for the initial release.",
+  "The Reconciliation Service performs daily batch matching of internal ledger entries against bank statements, with Kafka-based exception handling."
+]

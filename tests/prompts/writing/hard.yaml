@@ -1,0 +1,74 @@
+category: writing
+tier: hard
+name: "Thought leadership on local AI costs"
+description: "Tests ability to write a 2,000-word thought leadership piece with original analysis, counterarguments, thesis, and recommendations on local AI cost reduction"
+prompt: |
+  Write a 2,000-word thought leadership article titled "The Hidden Economics of Local AI: Why Running Models On-Premise Might Cost Less Than You Think."
+
+  This article is for publication on a respected technology blog (think: InfoQ, Pragmatic Engineer, or a reputable company engineering blog). The audience is CTOs, VPs of Engineering, and senior architects at companies spending $50K-$500K/month on cloud AI inference.
+
+  ## Requirements
+
+  ### Thesis
+  Develop and defend a specific thesis: that for companies with predictable, high-volume AI inference workloads, local/on-premise model hosting (using consumer and enterprise GPUs) has reached a cost crossover point where it is significantly cheaper than cloud API calls or cloud GPU instances, but only under specific conditions that you must clearly define.
+
+  ### Original Analysis
+  Include a worked cost comparison with realistic numbers:
+  - Cloud scenario: Company running 10M inference requests/day using a hosted API (e.g., a GPT-4-class model at representative per-token pricing). Calculate monthly cost.
+  - Local scenario: Same workload served by on-premise hardware (specify GPU models, server configuration, power, cooling, staffing). Calculate TCO over 18 months including hardware depreciation.
+  - Show the breakeven point and sensitivity to utilisation rate.
+  - Acknowledge where the numbers are estimates and what assumptions drive the conclusion.
+
+  ### Counterarguments (at least 3)
+  Address and respond to each:
+  1. "Local AI requires ML engineering talent you probably don't have"
+  2. "GPU hardware depreciates rapidly and the next generation makes your investment obsolete"
+  3. "Cloud providers offer capabilities (fine-tuning APIs, safety filters, compliance certifications) that are expensive to replicate locally"
+  4. Optionally add a fourth counterargument of your choosing
+
+  ### Conditions and Caveats
+  Clearly define when local AI does and does not make sense. Include:
+  - Minimum inference volume threshold
+  - Workload predictability requirements
+  - Model size constraints (what fits on local hardware vs. what doesn't)
+  - Regulatory considerations that might favor local deployment
+  - The hybrid approach: which workloads to keep in cloud vs. move local
+
+  ### Recommendations
+  Provide 3-5 actionable recommendations for a CTO evaluating this decision, including a suggested evaluation framework or decision tree.
+
+  ## Style Guidelines
+  - Authoritative and analytical, not salesy
+  - Support claims with specific numbers (realistic, clearly labelled as estimates where appropriate)
+  - Acknowledge uncertainty and complexity rather than oversimplifying
+  - Use clear section headings
+  - Short paragraphs (2-4 sentences)
+  - No marketing cliches, no "game-changer" or "paradigm shift" language
+  - Include at least one analogy that makes a complex point more accessible
+  - The piece should feel like it was written by someone who has actually done this, not someone summarising blog posts about it
+temperature: 0.7
+max_output_tokens: 4096
+evaluation:
+  type: "writing"
+  criteria:
+    - name: "word_count"
+      description: "Approximately 2,000 words (1,800-2,200 acceptable range)"
+      weight: 0.05
+    - name: "thesis_clarity"
+      description: "Clear, specific, defensible thesis stated early and supported throughout. Not wishy-washy 'it depends' without taking a position."
+      weight: 0.15
+    - name: "original_analysis"
+      description: "Worked cost comparison with specific, realistic numbers for both cloud and local scenarios. Shows breakeven point. Acknowledges assumptions."
+      weight: 0.25
+    - name: "counterarguments"
+      description: "Addresses at least 3 counterarguments with substantive responses, not strawman dismissals"
+      weight: 0.20
+    - name: "nuance_and_caveats"
+      description: "Clearly defines when local AI does and does not make sense. Does not oversimplify."
+      weight: 0.15
+    - name: "recommendations"
+      description: "Actionable, specific recommendations including evaluation framework"
+      weight: 0.10
+    - name: "writing_quality"
+      description: "Authoritative tone, no cliches, specific examples, good structure, feels written by a practitioner"
+      weight: 0.10

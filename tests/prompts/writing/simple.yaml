@@ -1,0 +1,33 @@
+category: writing
+tier: simple
+name: "Slack project update"
+description: "Tests ability to write a concise, appropriately-toned internal Slack update about a project milestone"
+prompt: |
+  Write a 200-word internal Slack message to the #engineering channel announcing that the API v2 migration project has reached a key milestone: all 14 production services have been successfully migrated from REST to gRPC, completing 3 weeks ahead of the original schedule.
+
+  Context to include:
+  - The migration improved average inter-service latency from 45ms to 12ms
+  - Payload sizes reduced by approximately 60% due to Protocol Buffers
+  - Two incidents occurred during migration (one timeout misconfiguration, one proto schema mismatch) but were resolved within 30 minutes each
+  - Credit the team: Alice (lead architect), Bob and Carol (implementation), Dave (testing/rollback procedures)
+  - Next step: decommission legacy REST endpoints after 2-week observation period
+  - Link to the migration dashboard (use placeholder URL)
+
+  Tone: Professional but warm. Not corporate-speak. Appropriate use of emoji for Slack. No bullet points in the main body - write it as flowing prose with a brief sign-off.
+temperature: 0.7
+max_output_tokens: 512
+evaluation:
+  type: "writing"
+  criteria:
+    - name: "word_count"
+      description: "Approximately 200 words (180-220 acceptable range)"
+      weight: 0.15
+    - name: "content_completeness"
+      description: "Includes all specified information: milestone achieved, performance improvements, incidents mentioned, team credited, next steps stated"
+      weight: 0.30
+    - name: "tone"
+      description: "Professional but warm, appropriate for Slack, uses emoji naturally without overdoing it, avoids corporate jargon"
+      weight: 0.30
+    - name: "format"
+      description: "Flowing prose (not bullet points), includes sign-off, includes placeholder link"
+      weight: 0.25

@@ -1,0 +1,55 @@
+category: code_gen
+tier: simple
+name: "CSV column averages"
+description: "Tests ability to write a well-typed Python function with docstring that parses CSV data and computes per-column averages"
+prompt: |
+  Write a Python function called `compute_column_averages` that:
+
+  1. Accepts a file path (str) to a CSV file as its only argument.
+  2. Reads the CSV file using the `csv` module from the standard library.
+  3. Assumes the first row is a header row containing column names.
+  4. Identifies which columns are numeric (contain only values parseable as int or float; empty cells should be skipped, not treated as zero).
+  5. Returns a `dict[str, float]` mapping each numeric column name to its arithmetic mean, rounded to 2 decimal places.
+
+  Requirements:
+  - Include full PEP-484 type hints on the function signature and any helper functions.
+  - Include a Google-style docstring with Args, Returns, and Raises sections.
+  - Raise `FileNotFoundError` if the path does not exist.
+  - Raise `ValueError` if the CSV has no data rows or no numeric columns.
+  - Do not use pandas or any third-party libraries.
+  - Handle edge cases: empty cells, trailing whitespace in values, mixed numeric/non-numeric columns.
+
+  Provide only the Python code with no surrounding explanation.
+temperature: 0.3
+max_output_tokens: 1024
+evaluation:
+  type: "code_execution"
+  language: "python"
+  test_cases:
+    - description: "Basic CSV with two numeric columns"
+      setup: |
+        import tempfile, os
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        f.write("name,age,score\nAlice,30,85.5\nBob,25,92.0\nCharlie,35,78.5\n")
+        f.close()
+      input: "f.name"
+      expected: {"age": 30.0, "score": 85.33}
+      cleanup: "os.unlink(f.name)"
+    - description: "Handles empty cells gracefully"
+      setup: |
+        import tempfile, os
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        f.write("x,y\n1,2\n,4\n3,\n")
+        f.close()
+      input: "f.name"
+      expected: {"x": 2.0, "y": 3.0}
+      cleanup: "os.unlink(f.name)"
+    - description: "Raises ValueError on empty data"
+      setup: |
+        import tempfile, os
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        f.write("a,b,c\n")
+        f.close()
+      input: "f.name"
+      expected_exception: "ValueError"
+      cleanup: "os.unlink(f.name)"

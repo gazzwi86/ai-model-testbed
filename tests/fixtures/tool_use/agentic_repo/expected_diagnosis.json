@@ -1,0 +1,25 @@
+{
+  "bug_description": "The Calculator.divide() and Calculator.modulo() methods do not handle division by zero. When the divisor (b) is 0, Python raises a ZeroDivisionError, but the tests expect a ValueError with the message 'Cannot divide by zero'.",
+  "affected_methods": [
+    "Calculator.divide",
+    "Calculator.modulo",
+    "Calculator.evaluate"
+  ],
+  "root_cause_file": "src/calculator.py",
+  "root_cause_lines": {
+    "divide": 46,
+    "modulo": 60
+  },
+  "failing_tests": [
+    "TestDivisionByZero::test_divide_by_zero_raises_value_error",
+    "TestDivisionByZero::test_modulo_by_zero_raises_value_error",
+    "TestDivisionByZero::test_evaluate_division_by_zero"
+  ],
+  "expected_fix": {
+    "description": "Add a zero-check at the top of divide() and modulo() that raises ValueError('Cannot divide by zero') when b == 0. The evaluate() method calls divide() internally, so it will be fixed transitively.",
+    "divide_fix": "def divide(self, a, b):\n    if b == 0:\n        raise ValueError(\"Cannot divide by zero\")\n    result = a / b\n    self._record(\"divide\", a, b, result)\n    return result",
+    "modulo_fix": "def modulo(self, a, b):\n    if b == 0:\n        raise ValueError(\"Cannot divide by zero\")\n    result = a % b\n    self._record(\"modulo\", a, b, result)\n    return result"
+  },
+  "passing_tests_after_fix": 25,
+  "failing_tests_after_fix": 0
+}

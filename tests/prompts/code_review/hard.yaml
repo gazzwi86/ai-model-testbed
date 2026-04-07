@@ -1,0 +1,335 @@
+category: code_review
+tier: hard
+name: "Legacy module refactor (12 issues)"
+description: "Tests ability to identify 12 issues in a 500-line legacy Python module including circular imports, global state, mixed concerns, security, performance, and logic bugs"
+prompt: |
+  Review and refactor the following legacy Python module. Identify all bugs, security vulnerabilities, design issues, and performance problems. For each issue, explain the problem and provide corrected code. Then propose a refactored architecture.
+
+  ```python
+  # app/core/engine.py
+  import json
+  import os
+  import sys
+  import time
+  import hashlib
+  import pickle
+  import threading
+  import smtplib
+  from datetime import datetime
+  from email.mime.text import MIMEText
+
+  # Circular: app.core.engine imports app.api.routes, and app.api.routes imports app.core.engine
+  from app.api.routes import get_router
+  from app.models.user import User
+
+  # Global mutable state
+  _cache = {}
+  _db_connection = None
+  _config = {}
+  _request_count = 0
+  _error_log = []
+
+  SMTP_PASSWORD = "mailgun_p@ssw0rd_2024"
+  ENCRYPTION_KEY = b"0123456789abcdef"
+
+  def init_app():
+      global _db_connection, _config
+      _config = json.load(open("config.json"))
+      import sqlite3
+      _db_connection = sqlite3.connect(_config["db_path"])
+      _setup_tables()
+
+  def _setup_tables():
+      _db_connection.execute("""
+          CREATE TABLE IF NOT EXISTS orders (
+              id INTEGER PRIMARY KEY,
+              user_id INTEGER,
+              product TEXT,
+              quantity INTEGER,
+              price REAL,
+              status TEXT DEFAULT 'pending',
+              created_at TEXT,
+              metadata TEXT
+          )
+      """)
+      _db_connection.execute("""
+          CREATE TABLE IF NOT EXISTS audit_log (
+              id INTEGER PRIMARY KEY,
+              action TEXT,
+              user_id INTEGER,
+              details TEXT,
+              timestamp TEXT
+          )
+      """)
+      _db_connection.commit()
+
+  def create_order(user_id, product, quantity, price, metadata=None):
+      global _request_count
+      _request_count += 1
+
+      # No validation
+      total = quantity * price
+
+      # SQL injection
+      query = f"""INSERT INTO orders (user_id, product, quantity, price, status, created_at, metadata)
+                  VALUES ({user_id}, '{product}', {quantity}, {price}, 'pending',
+                  '{datetime.now().isoformat()}', '{json.dumps(metadata)}')"""
+      _db_connection.execute(query)
+      _db_connection.commit()
+
+      order_id = _db_connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+      # Mixed concern: business logic + email notification in same function
+      _send_order_email(user_id, order_id, product, total)
+
+      # Mixed concern: caching logic embedded
+      _cache[f"user_{user_id}_orders"] = None  # invalidate but never repopulate properly
+
+      # Audit logging mixed in
+      _log_audit("create_order", user_id, f"Order {order_id} created for {product}")
+
+      return order_id
+
+  def get_orders(user_id, status=None, page=1, per_page=50):
+      cache_key = f"user_{user_id}_orders_{status}_{page}"
+      if cache_key in _cache and _cache[cache_key] is not None:
+          return _cache[cache_key]
+
+      # SQL injection via status parameter
+      query = f"SELECT * FROM orders WHERE user_id = {user_id}"
+      if status:
+          query += f" AND status = '{status}'"
+      query += f" LIMIT {per_page} OFFSET {(page - 1) * per_page}"
+
+      cursor = _db_connection.execute(query)
+      orders = []
+      for row in cursor.fetchall():
+          orders.append({
+              "id": row[0], "user_id": row[1], "product": row[2],
+              "quantity": row[3], "price": row[4], "status": row[5],
+              "created_at": row[6], "metadata": json.loads(row[7]) if row[7] else None
+          })
+
+      _cache[cache_key] = orders  # Cache without TTL - stale forever
+      return orders
+
+  def update_order_status(order_id, new_status):
+      # No validation of status transitions
+      valid_statuses = ["pending", "confirmed", "shipped", "delivered", "cancelled"]
+      # Bug: checks but doesn't enforce
+      if new_status not in valid_statuses:
+          pass  # silently ignores invalid status
+
+      _db_connection.execute(
+          f"UPDATE orders SET status = '{new_status}' WHERE id = {order_id}"
+      )
+      _db_connection.commit()
+
+      order = _db_connection.execute(
+          f"SELECT user_id, product, price FROM orders WHERE id = {order_id}"
+      ).fetchone()
+
+      if new_status == "shipped":
+          _send_shipping_email(order[0], order_id, order[1])
+
+      _log_audit("update_status", order[0], f"Order {order_id} -> {new_status}")
+
+  def cancel_order(order_id, user_id, reason=""):
+      order = _db_connection.execute(
+          f"SELECT status, user_id FROM orders WHERE id = {order_id}"
+      ).fetchone()
+
+      # Bug: no check if order belongs to user_id (authorization bypass)
+      if order[0] in ("shipped", "delivered"):
+          return {"error": "Cannot cancel shipped/delivered order"}
+
+      # Bug: no check if order is None (order not found)
+      _db_connection.execute(
+          f"UPDATE orders SET status = 'cancelled' WHERE id = {order_id}"
+      )
+      _db_connection.commit()
+      _log_audit("cancel_order", user_id, f"Order {order_id} cancelled: {reason}")
+      return {"success": True}
+
+  def generate_sales_report(start_date, end_date):
+      """Generate sales report. Performance: loads ALL orders into memory."""
+      cursor = _db_connection.execute("SELECT * FROM orders")
+      all_orders = cursor.fetchall()  # Loads everything regardless of date range
+
+      report = {"total_revenue": 0, "order_count": 0, "by_product": {}}
+      for row in all_orders:
+          order_date = row[6]  # created_at string
+          # Bug: string comparison for dates doesn't always work correctly
+          if start_date <= order_date <= end_date:
+              revenue = row[3] * row[4]  # quantity * price
+              report["total_revenue"] += revenue
+              report["order_count"] += 1
+              product = row[2]
+              if product not in report["by_product"]:
+                  report["by_product"][product] = {"count": 0, "revenue": 0}
+              report["by_product"][product]["count"] += 1
+              report["by_product"][product]["revenue"] += revenue
+
+      return report
+
+  def export_report(report, format="json"):
+      if format == "json":
+          return json.dumps(report)
+      elif format == "pickle":
+          # Security: pickle is unsafe for untrusted data
+          return pickle.dumps(report)
+      elif format == "html":
+          # XSS: product names inserted without escaping
+          html = "<html><body><h1>Sales Report</h1><table>"
+          html += f"<tr><td>Total Revenue</td><td>${report['total_revenue']:.2f}</td></tr>"
+          html += f"<tr><td>Order Count</td><td>{report['order_count']}</td></tr>"
+          for product, data in report["by_product"].items():
+              html += f"<tr><td>{product}</td><td>${data['revenue']:.2f}</td><td>{data['count']}</td></tr>"
+          html += "</table></body></html>"
+          return html
+
+  def _send_order_email(user_id, order_id, product, total):
+      try:
+          user = _db_connection.execute(
+              f"SELECT email FROM users WHERE id = {user_id}"
+          ).fetchone()
+          msg = MIMEText(f"Your order #{order_id} for {product} (${total:.2f}) has been placed.")
+          msg["Subject"] = "Order Confirmation"
+          msg["From"] = "orders@example.com"
+          msg["To"] = user[0]
+          server = smtplib.SMTP("smtp.example.com", 587)
+          server.login("orders@example.com", SMTP_PASSWORD)
+          server.send_message(msg)
+          # Bug: server.quit() never called
+      except:
+          # Silent exception swallowing
+          _error_log.append({"time": time.time(), "error": "email failed", "user": user_id})
+
+  def _send_shipping_email(user_id, order_id, product):
+      try:
+          user = _db_connection.execute(
+              f"SELECT email FROM users WHERE id = {user_id}"
+          ).fetchone()
+          msg = MIMEText(f"Your order #{order_id} ({product}) has been shipped!")
+          msg["Subject"] = "Shipping Notification"
+          msg["From"] = "orders@example.com"
+          msg["To"] = user[0]
+          server = smtplib.SMTP("smtp.example.com", 587)
+          server.login("orders@example.com", SMTP_PASSWORD)
+          server.send_message(msg)
+      except:
+          pass  # Silently ignore email failures
+
+  def _log_audit(action, user_id, details):
+      _db_connection.execute(
+          f"INSERT INTO audit_log (action, user_id, details, timestamp) "
+          f"VALUES ('{action}', {user_id}, '{details}', '{datetime.now().isoformat()}')"
+      )
+      _db_connection.commit()
+
+  def hash_password(password):
+      # Insecure: plain MD5, no salt
+      return hashlib.md5(password.encode()).hexdigest()
+
+  def verify_password(password, hashed):
+      return hashlib.md5(password.encode()).hexdigest() == hashed
+
+  def authenticate_user(username, password):
+      cursor = _db_connection.execute(
+          f"SELECT id, password_hash FROM users WHERE username = '{username}'"
+      )
+      row = cursor.fetchone()
+      if row and verify_password(password, row[1]):
+          return {"user_id": row[0], "token": hashlib.sha256(f"{row[0]}:{time.time()}".encode()).hexdigest()}
+      return None
+
+  def process_webhook(payload_bytes):
+      """Process incoming webhook. Deserialises arbitrary pickle data."""
+      try:
+          data = pickle.loads(payload_bytes)  # Remote code execution vulnerability
+          if data.get("event") == "payment_confirmed":
+              update_order_status(data["order_id"], "confirmed")
+          return {"processed": True}
+      except:
+          return {"error": "Invalid payload"}
+
+  def get_system_stats():
+      return {
+          "request_count": _request_count,
+          "cache_size": len(_cache),
+          "error_count": len(_error_log),
+          "db_path": _config.get("db_path", "unknown"),
+          "smtp_password": SMTP_PASSWORD,  # Bug: leaking credentials in stats
+      }
+
+  # Background thread for cache cleanup - but it accesses shared state unsafely
+  def _cache_cleanup_worker():
+      while True:
+          time.sleep(300)
+          keys_to_delete = [k for k in _cache if _cache[k] is None]
+          for k in keys_to_delete:
+              del _cache[k]
+
+  cleanup_thread = threading.Thread(target=_cache_cleanup_worker, daemon=True)
+  cleanup_thread.start()
+  ```
+
+  Provide:
+  1. A numbered list of every issue found with line numbers, category, severity, and explanation.
+  2. A proposed refactored architecture (class/module diagram).
+  3. Corrected code for the most critical issues.
+temperature: 0.3
+max_output_tokens: 8192
+evaluation:
+  type: "bug_detection"
+  checklist:
+    - id: "issue_1_circular_import"
+      description: "Circular import between app.core.engine and app.api.routes"
+      severity: "high"
+      category: "design"
+    - id: "issue_2_global_state"
+      description: "Module-level mutable globals (_cache, _db_connection, _config, _request_count, _error_log) make testing impossible and introduce concurrency bugs"
+      severity: "high"
+      category: "design"
+    - id: "issue_3_mixed_concerns"
+      description: "create_order mixes business logic, email notifications, caching, and audit logging. Same for update_order_status."
+      severity: "medium"
+      category: "design"
+    - id: "issue_4_sql_injection"
+      description: "Nearly every database query uses f-string interpolation, enabling SQL injection (create_order, get_orders, update_order_status, cancel_order, authenticate_user, etc.)"
+      severity: "critical"
+      category: "security"
+    - id: "issue_5_hardcoded_secrets"
+      description: "SMTP_PASSWORD and ENCRYPTION_KEY are hardcoded in source code"
+      severity: "critical"
+      category: "security"
+    - id: "issue_6_credential_leak"
+      description: "get_system_stats() returns SMTP_PASSWORD in its response"
+      severity: "critical"
+      category: "security"
+    - id: "issue_7_pickle_rce"
+      description: "process_webhook uses pickle.loads on untrusted input, enabling remote code execution"
+      severity: "critical"
+      category: "security"
+    - id: "issue_8_insecure_hashing"
+      description: "hash_password uses MD5 without salt. Must use bcrypt, scrypt, or argon2."
+      severity: "critical"
+      category: "security"
+    - id: "issue_9_xss"
+      description: "export_report HTML format inserts product names without HTML escaping"
+      severity: "high"
+      category: "security"
+    - id: "issue_10_performance"
+      description: "generate_sales_report loads ALL orders into memory instead of using SQL WHERE clause with date filtering"
+      severity: "high"
+      category: "performance"
+    - id: "issue_11_authorization_bypass"
+      description: "cancel_order does not verify that user_id owns the order, allowing any user to cancel any order"
+      severity: "high"
+      category: "security"
+    - id: "issue_12_silent_failures"
+      description: "Multiple bare except clauses silently swallow errors (_send_order_email, _send_shipping_email, process_webhook). update_order_status silently ignores invalid status values."
+      severity: "medium"
+      category: "reliability"
+  pass_threshold: 9
+  max_false_positives: 5

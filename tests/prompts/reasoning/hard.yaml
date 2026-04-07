@@ -1,0 +1,68 @@
+category: reasoning
+tier: hard
+name: "Monolith-to-microservices migration"
+description: "Tests ability to produce a nuanced, constraint-aware migration recommendation for a complex real-world scenario with competing requirements"
+prompt: |
+  You are a principal architect consulting for a mid-size fintech company. Produce a migration recommendation based on the following constraints:
+
+  ## Current State
+  - **Codebase**: 500,000 LOC Java monolith (Spring Boot), deployed as a single WAR on 8 Tomcat instances behind an F5 load balancer
+  - **Database**: Single Oracle 19c instance (4TB data, 200+ tables, 50+ stored procedures containing business logic)
+  - **Traffic**: 2 million DAU, 15,000 requests/sec peak, current p99 latency 180ms (SLA is 200ms)
+  - **Deployment**: Bi-weekly releases via Jenkins, 45-minute deployment window with 10-minute rollback capability
+  - **Pain points**: Deployment coordination across 4 teams is the #1 complaint. A change in payments code requires full regression testing (6 hours). Developer onboarding takes 3 months.
+
+  ## Teams (4 teams, ~40 engineers total)
+  - **Payments** (12 engineers): Handles transaction processing, settlement, reconciliation. Highest change velocity (8-10 PRs/week). Most critical domain - any outage is revenue-impacting.
+  - **Identity** (8 engineers): Authentication, KYC, fraud detection. Moderate change velocity (3-4 PRs/week). Subject to regulatory compliance requirements (PCI-DSS, SOC2).
+  - **Lending** (10 engineers): Loan origination, underwriting, servicing. Low change velocity (2-3 PRs/week) but complex business logic with many edge cases.
+  - **Platform** (10 engineers): Shared infrastructure, CI/CD, monitoring, developer tooling. Currently spends 60% of time on deployment coordination and incident response.
+
+  ## Constraints
+  - **Deadline**: Board has approved 6 months of migration effort. After 6 months, the company enters a regulatory audit period where architectural changes are frozen for 3 months.
+  - **Budget**: $800K total (covering additional infrastructure, tooling, and any external consulting - not headcount, which is fixed)
+  - **SLA**: p99 latency must not exceed 200ms at any point during migration. Zero tolerance for data inconsistency in financial transactions.
+  - **Compliance**: PCI-DSS scope must not expand. Any new service handling card data must be in-scope and audited.
+
+  ## Your Task
+
+  Produce a detailed recommendation covering:
+
+  1. **Migration strategy**: Full microservices, modular monolith, or hybrid? Justify with reference to the specific constraints. If incremental, which domain extracts first and why?
+
+  2. **Sequencing plan**: Month-by-month plan for the 6-month window. What is delivered at each stage? What are the decision gates?
+
+  3. **Database strategy**: How do you handle the shared Oracle database? Strangler fig? Database-per-service? Shared database with schema separation? How do you handle the stored procedures?
+
+  4. **Risk analysis**: Top 5 risks with likelihood, impact, and specific mitigations. Include at least one risk that argues against the migration.
+
+  5. **What NOT to do**: Explicitly state what you would defer or avoid. Justify each exclusion.
+
+  6. **Success metrics**: How do you measure whether the migration is succeeding? Define 3-5 metrics with specific targets and measurement frequency.
+
+  7. **Honest assessment**: What is the probability of completing this in 6 months? What is the most likely failure mode? What would you tell the board?
+
+  Be specific. Reference the actual team sizes, traffic numbers, and constraints. Generic microservices advice with no connection to these specifics will be considered a failure.
+temperature: 0.7
+max_output_tokens: 4096
+evaluation:
+  type: "reasoning"
+  criteria:
+    - name: "constraint_awareness"
+      description: "Recommendation demonstrably shaped by the specific constraints (6 months, $800K, 200ms SLA, PCI-DSS, 40 engineers). Not generic advice with constraints mentioned as afterthoughts."
+      weight: 0.25
+    - name: "strategy_justification"
+      description: "Migration strategy choice is well-justified with explicit reasoning about why alternatives were rejected for this specific situation"
+      weight: 0.20
+    - name: "sequencing_realism"
+      description: "Month-by-month plan is realistic given team sizes and constraints. Does not assume infinite parallelism or zero learning curve."
+      weight: 0.20
+    - name: "database_strategy"
+      description: "Database strategy addresses the hard problems: shared Oracle, stored procedures, data consistency during transition. Does not hand-wave."
+      weight: 0.15
+    - name: "risk_honesty"
+      description: "Risk analysis is honest and includes genuine risks (not strawmen). Includes at least one argument against the migration."
+      weight: 0.10
+    - name: "practical_specificity"
+      description: "Recommendations reference specific teams, traffic numbers, and technical details from the scenario rather than being interchangeable with any migration plan"
+      weight: 0.10

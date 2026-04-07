@@ -1,0 +1,25 @@
+requirements:
+  - id: R1
+    description: "System must handle at least 10,000 transactions per second"
+  - id: R2
+    description: "All payment data must be encrypted at rest and in transit (PCI DSS compliance)"
+  - id: R3
+    description: "System must provide 99.99% uptime SLA"
+  - id: R4
+    description: "Disaster recovery with RPO < 1 hour and RTO < 4 hours"
+  - id: R5
+    description: "Multi-region deployment for geographic redundancy"
+  - id: R6
+    description: "Real-time fraud detection with < 100ms decision latency"
+  - id: R7
+    description: "Support for at least 5 payment methods (card, bank transfer, digital wallet, BNPL, crypto)"
+  - id: R8
+    description: "Comprehensive audit trail for all transactions"
+  - id: R9
+    description: "API rate limiting and DDoS protection"
+  - id: R10
+    description: "Automated compliance reporting (PCI DSS, SOC 2, GDPR)"
+  - id: R11
+    description: "Blue-green or canary deployment capability"
+  - id: R12
+    description: "Monitoring and alerting with < 5 minute detection time"

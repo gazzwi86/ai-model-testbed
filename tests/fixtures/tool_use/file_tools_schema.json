@@ -1,0 +1,32 @@
+{
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read the contents of a file at the given path",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute or relative path to the file to read"
+          }
+        },
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "run_tests",
+      "description": "Run the test suite for the project at the given path",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the project or test directory to run tests in"
+          }
+        },
+        "required": ["path"]
+      }
+    }
+  ]
+}

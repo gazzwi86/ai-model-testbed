@@ -1,0 +1,58 @@
+[
+  {
+    "bug_id": 1,
+    "description": "God class: UserManager has >5 responsibilities (DB connection, CRUD, authentication, HTML rendering, CSV export/import, audit logging) and should be decomposed",
+    "line_range": [30, 170],
+    "severity": "medium",
+    "category": "design"
+  },
+  {
+    "bug_id": 2,
+    "description": "Missing input validation: create_user() accepts arbitrary username, email, password, and role values without any validation or sanitisation",
+    "line_range": [62, 63],
+    "severity": "high",
+    "category": "validation"
+  },
+  {
+    "bug_id": 3,
+    "description": "SQL injection: multiple queries use f-string interpolation of user-supplied data instead of parameterised queries (create_user, get_user, update_user, delete_user, list_users, authenticate)",
+    "line_range": [65, 68],
+    "severity": "critical",
+    "category": "security"
+  },
+  {
+    "bug_id": 4,
+    "description": "Hardcoded credentials: admin username, password, and API key are stored as module-level constants in source code",
+    "line_range": [23, 26],
+    "severity": "critical",
+    "category": "security"
+  },
+  {
+    "bug_id": 5,
+    "description": "No error handling on file I/O: export_users_csv() and import_users_csv() do not handle FileNotFoundError, PermissionError, or other I/O exceptions",
+    "line_range": [145, 160],
+    "severity": "medium",
+    "category": "error_handling"
+  },
+  {
+    "bug_id": 6,
+    "description": "Race condition: increment_counter() reads and writes _user_counter without acquiring _counter_lock, so concurrent threads can lose increments",
+    "line_range": [180, 187],
+    "severity": "medium",
+    "category": "concurrency"
+  },
+  {
+    "bug_id": 7,
+    "description": "Memory leak: _audit_log is a module-level list that grows with every action and is never cleared, truncated, or rotated",
+    "line_range": [13, 13],
+    "severity": "medium",
+    "category": "resource_management"
+  },
+  {
+    "bug_id": 8,
+    "description": "XSS vulnerability: render_user_profile() and render_user_list_page() interpolate user-supplied data directly into HTML without escaping",
+    "line_range": [125, 137],
+    "severity": "high",
+    "category": "security"
+  }
+]

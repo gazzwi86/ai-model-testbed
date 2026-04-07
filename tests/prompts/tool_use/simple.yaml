@@ -1,0 +1,122 @@
+category: tool_use
+tier: simple
+name: "Weather API function call"
+description: "Tests ability to generate a correct function call from an OpenAPI spec for a specific query"
+prompt: |
+  You have access to the following weather API. Based on the OpenAPI specification below, generate the correct function call to get a 5-day weather forecast for London, United Kingdom, in metric units (Celsius).
+
+  ## Available Tools
+
+  ```json
+  {
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather_forecast",
+          "description": "Get weather forecast for a specified location",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "City name, optionally with country code (e.g., 'London,UK', 'Paris,FR')"
+              },
+              "days": {
+                "type": "integer",
+                "description": "Number of forecast days (1-14)",
+                "minimum": 1,
+                "maximum": 14
+              },
+              "units": {
+                "type": "string",
+                "enum": ["metric", "imperial", "standard"],
+                "description": "Temperature units: 'metric' for Celsius, 'imperial' for Fahrenheit, 'standard' for Kelvin",
+                "default": "standard"
+              },
+              "include": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["temperature", "humidity", "wind", "precipitation", "uv_index", "air_quality"]
+                },
+                "description": "Data points to include in the response. Defaults to all if omitted."
+              },
+              "language": {
+                "type": "string",
+                "description": "Language code for weather descriptions (e.g., 'en', 'fr', 'de')",
+                "default": "en"
+              }
+            },
+            "required": ["location", "days"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_current_weather",
+          "description": "Get current weather conditions for a specified location",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "City name, optionally with country code"
+              },
+              "units": {
+                "type": "string",
+                "enum": ["metric", "imperial", "standard"],
+                "default": "standard"
+              }
+            },
+            "required": ["location"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather_alerts",
+          "description": "Get active weather alerts for a specified location",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "City name, optionally with country code"
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["all", "moderate", "severe", "extreme"],
+                "default": "all"
+              }
+            },
+            "required": ["location"]
+          }
+        }
+      }
+    ]
+  }
+  ```
+
+  Respond with ONLY the function call in this exact JSON format:
+  ```json
+  {
+    "function": "<function_name>",
+    "arguments": { ... }
+  }
+  ```
+
+  Do not include any explanation before or after the JSON.
+temperature: 0.3
+max_output_tokens: 256
+evaluation:
+  type: "tool_use"
+  expected_function: "get_weather_forecast"
+  expected_arguments:
+    location: "London,UK"
+    days: 5
+    units: "metric"
+  required_arguments: ["location", "days", "units"]
+  disallowed_functions: ["get_current_weather", "get_weather_alerts"]

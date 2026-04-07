@@ -1,0 +1,9 @@
+[
+  "The Aurora product launch date is confirmed for April 12th, with the press embargo lifting at 9 AM Eastern that day.",
+  "An Android 12 image-upload crash is the only P0/P1 blocker; David Kim's team is investigating and will report status by Wednesday March 18th at 5 PM.",
+  "If the Android crash root cause is not identified by Wednesday, the fallback plan is to disable image upload on affected devices for launch.",
+  "Code freeze is set for March 20th, with a single exception granted for the Android image-upload fix only.",
+  "The product demo video depends on updated screenshots from engineering; James O'Brien will deliver the final video to Lisa Patel by Friday March 20th.",
+  "Rachel Torres will run a full end-to-end QA regression pass during the week of March 23rd, requiring the code freeze to hold.",
+  "A go/no-go review meeting is to be scheduled for March 25th by Sarah Chen."
+]

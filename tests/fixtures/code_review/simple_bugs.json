@@ -1,0 +1,37 @@
+[
+  {
+    "bug_id": 1,
+    "description": "Off-by-one error in loop: range(len(rows) - 1) skips the last row of data",
+    "line_range": [36, 36],
+    "severity": "medium",
+    "category": "logic"
+  },
+  {
+    "bug_id": 2,
+    "description": "Unclosed file handle: open() is used without a 'with' statement and f.close() is never called, leaking the file descriptor",
+    "line_range": [12, 18],
+    "severity": "medium",
+    "category": "resource_management"
+  },
+  {
+    "bug_id": 3,
+    "description": "Silent type coercion: 'price' is a string from the CSV but is compared to int 0 using '>', which performs lexicographic comparison instead of numeric",
+    "line_range": [39, 39],
+    "severity": "medium",
+    "category": "type_error"
+  },
+  {
+    "bug_id": 4,
+    "description": "Missing return statement: get_top_product() does not return best_product when best_sales > 0, so the function implicitly returns None",
+    "line_range": [56, 57],
+    "severity": "high",
+    "category": "logic"
+  },
+  {
+    "bug_id": 5,
+    "description": "Index error on empty input: calculate_total_sales() does not guard against empty rows list; accessing rows[i] will work but the function silently returns 0 instead of signalling 'no data', and the off-by-one makes range(-1) which yields nothing",
+    "line_range": [34, 36],
+    "severity": "low",
+    "category": "error_handling"
+  }
+]

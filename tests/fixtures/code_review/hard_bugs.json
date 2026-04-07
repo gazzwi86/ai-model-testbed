@@ -1,0 +1,86 @@
+[
+  {
+    "bug_id": 1,
+    "description": "Circular import pattern: the module contains _get_loader_reference() which uses __import__(__name__) to simulate the original circular dependency between data_loader, transformer, and reporter modules",
+    "line_range": [101, 110],
+    "severity": "low",
+    "category": "design"
+  },
+  {
+    "bug_id": 2,
+    "description": "Global mutable state: _pipeline_config, _processed_ids, _error_buffer, _run_counter, and _stats are module-level mutable variables shared by all functions, preventing parallel execution and isolated testing",
+    "line_range": [35, 46],
+    "severity": "medium",
+    "category": "design"
+  },
+  {
+    "bug_id": 3,
+    "description": "Mixed concerns: load_csv() performs validation and transformation; transform_batch() does formatting; report generation is in the same module as data loading. Business logic, I/O, and presentation are entangled throughout",
+    "line_range": [57, 75],
+    "severity": "medium",
+    "category": "design"
+  },
+  {
+    "bug_id": 4,
+    "description": "SQL injection: store_rows() constructs INSERT queries using f-string interpolation of row keys and values, allowing injection via crafted data. Also present in backfill_display_names()",
+    "line_range": [245, 252],
+    "severity": "critical",
+    "category": "security"
+  },
+  {
+    "bug_id": 5,
+    "description": "Hardcoded secrets: DATABASE_URL with credentials, ENCRYPTION_KEY, and SLACK_WEBHOOK are stored as plaintext module-level constants",
+    "line_range": [49, 51],
+    "severity": "critical",
+    "category": "security"
+  },
+  {
+    "bug_id": 6,
+    "description": "Race condition: _run_counter is incremented in transform_batch() without acquiring any lock, so concurrent pipeline runs can produce incorrect counts",
+    "line_range": [145, 146],
+    "severity": "medium",
+    "category": "concurrency"
+  },
+  {
+    "bug_id": 7,
+    "description": "Unbounded memory growth: _error_buffer is appended to on every batch but is never cleared, truncated, or rotated, causing memory to grow indefinitely over long-running processes",
+    "line_range": [192, 192],
+    "severity": "medium",
+    "category": "resource_management"
+  },
+  {
+    "bug_id": 8,
+    "description": "Silent exception swallowing: load_csv(), load_json(), store_rows(), _send_slack_notification(), and the report-writing block all catch broad Exception and either return empty results or silently pass, hiding errors from callers",
+    "line_range": [73, 75],
+    "severity": "high",
+    "category": "error_handling"
+  },
+  {
+    "bug_id": 9,
+    "description": "Timezone-naive datetime comparison: transform_batch() parses event_date as a naive datetime and compares it to datetime.now() which uses local time, producing incorrect results if data contains UTC timestamps or the server changes timezone",
+    "line_range": [166, 176],
+    "severity": "medium",
+    "category": "logic"
+  },
+  {
+    "bug_id": 10,
+    "description": "Path traversal vulnerability: load_csv(), load_json(), and the output path in run_pipeline() accept user-controlled file paths without any sanitisation or restriction to a safe base directory",
+    "line_range": [57, 60],
+    "severity": "high",
+    "category": "security"
+  },
+  {
+    "bug_id": 11,
+    "description": "Integer overflow on large datasets: amount is converted to cents via int(float(amount) * 100) which can overflow when stored in a fixed-width database INTEGER column, silently truncating or erroring on very large financial amounts",
+    "line_range": [160, 164],
+    "severity": "medium",
+    "category": "logic"
+  },
+  {
+    "bug_id": 12,
+    "description": "Dead code / unreachable branches: _legacy_transform_v1(), _legacy_transform_v2(), _select_transform_strategy() for versions 1 and 2, migrate_schema_v1_to_v2(), backfill_display_names(), and _debug_dump_state() are all defined but never called from any active code path",
+    "line_range": [200, 230],
+    "severity": "low",
+    "category": "maintainability"
+  }
+]

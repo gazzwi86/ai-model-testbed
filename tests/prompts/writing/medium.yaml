@@ -1,0 +1,52 @@
+category: writing
+tier: medium
+name: "Blog post on AI cost governance"
+description: "Tests ability to write a structured, engaging 1,000-word blog post aimed at platform engineering leaders on a technical-business topic"
+prompt: |
+  Write a 1,000-word blog post titled "Why Platform Engineering Teams Should Care About AI Cost Governance."
+
+  Target audience: Senior platform engineers and engineering managers at mid-to-large companies (500-5000 employees) who are deploying AI/ML workloads on their internal platforms.
+
+  The blog post should cover:
+
+  1. **The problem:** AI workloads (training, fine-tuning, inference) are becoming a significant and often untracked portion of cloud spend. Unlike traditional compute, AI costs are spiky, hard to predict, and often initiated by data science teams outside normal infrastructure governance. Use a specific (but realistic) example: a team spinning up GPU instances for fine-tuning that cost $14,000 over a weekend because nobody set up auto-shutdown.
+
+  2. **Why platform teams specifically:** Platform teams sit at the intersection of infrastructure, developer experience, and cost management. They already manage resource quotas, CI/CD pipelines, and environment provisioning. AI cost governance is a natural extension, not a new responsibility.
+
+  3. **Three practical recommendations:**
+     - Build AI cost visibility into existing dashboards (tag GPU workloads, separate inference vs training costs, show cost-per-model-version)
+     - Implement GPU-aware resource quotas and automatic shutdown policies (with examples of Kubernetes resource quotas or cloud provider budget alerts)
+     - Create a lightweight internal "AI workload request" process that doesn't slow teams down but ensures costs are forecasted and approved
+
+  4. **The counterargument and response:** Address the concern that adding governance slows down innovation. Argue that guardrails enable faster iteration by preventing the cost blowups that trigger executive clampdowns and hiring freezes.
+
+  5. **Closing:** Forward-looking statement about AI costs as a percentage of total cloud spend and why getting governance right now prevents painful retrofitting later.
+
+  Style guidelines:
+  - Write in a conversational but authoritative tone (think: thoughtful senior engineer writing on their company blog)
+  - Use short paragraphs (2-4 sentences max)
+  - Include one concrete example or anecdote per major section
+  - Avoid buzzwords and marketing language
+  - Do not use the phrase "in today's rapidly evolving landscape" or any similar cliche
+  - No bullet points in the body text; use flowing prose with clear section transitions
+  - End with a practical call-to-action
+temperature: 0.7
+max_output_tokens: 2048
+evaluation:
+  type: "writing"
+  criteria:
+    - name: "word_count"
+      description: "Approximately 1,000 words (900-1,100 acceptable range)"
+      weight: 0.10
+    - name: "content_coverage"
+      description: "Covers all 5 required sections with sufficient depth: problem statement with example, why platform teams, 3 practical recommendations, counterargument, and forward-looking close"
+      weight: 0.25
+    - name: "concrete_examples"
+      description: "Includes specific, realistic examples and numbers (not vague generalities)"
+      weight: 0.20
+    - name: "tone_and_style"
+      description: "Conversational but authoritative, no buzzwords or cliches, short paragraphs, no bullet points"
+      weight: 0.25
+    - name: "actionability"
+      description: "Recommendations are practical and specific enough to act on, not generic advice"
+      weight: 0.20

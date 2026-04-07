@@ -1,0 +1,64 @@
+category: code_gen
+tier: hard
+name: "Concurrent task scheduler"
+description: "Tests ability to implement a production-grade concurrent task scheduler with backpressure, retry logic, circuit breaker, and structured logging"
+prompt: |
+  Implement a Python module (`scheduler.py`) containing a concurrent task scheduler with the following components. Use only the standard library (`asyncio`, `logging`, `dataclasses`, `enum`, `collections`, `time`, `random`, `typing`).
+
+  ## 1. TaskPriority enum
+  `LOW = 0`, `NORMAL = 1`, `HIGH = 2`, `CRITICAL = 3`
+
+  ## 2. Task dataclass
+  Fields: `id` (str, uuid4), `name` (str), `coroutine_factory` (Callable that returns an awaitable), `priority` (TaskPriority, default NORMAL), `max_retries` (int, default 3), `timeout_seconds` (float, default 30.0), `created_at` (float, time.time), `metadata` (dict, default empty).
+
+  ## 3. TaskResult dataclass
+  Fields: `task_id` (str), `success` (bool), `result` (Any | None), `error` (str | None), `attempts` (int), `duration_seconds` (float).
+
+  ## 4. CircuitBreaker class
+  - Constructor: `failure_threshold` (int, default 5), `recovery_timeout` (float, default 60.0), `half_open_max_calls` (int, default 3).
+  - States: CLOSED, OPEN, HALF_OPEN.
+  - `async def call(self, coro)` - Execute the coroutine respecting circuit state. Raise `CircuitOpenError` when OPEN. In HALF_OPEN, allow up to `half_open_max_calls` concurrent calls; if any succeed, transition to CLOSED; if any fail, transition to OPEN.
+  - Track `failure_count`, `success_count`, `last_failure_time`.
+  - Thread-safe using `asyncio.Lock`.
+
+  ## 5. RetryPolicy class
+  - `async def execute(self, task: Task, circuit_breaker: CircuitBreaker) -> TaskResult`
+  - Exponential backoff: base 1s, multiplier 2, jitter +/- 25%.
+  - Respects `task.max_retries`. On each attempt, call `circuit_breaker.call(task.coroutine_factory())` with `asyncio.wait_for` using `task.timeout_seconds`.
+  - Catch `asyncio.TimeoutError`, `CircuitOpenError`, and `Exception` separately; log each with structured fields.
+
+  ## 6. TaskScheduler class
+  - Constructor: `max_concurrency` (int, default 10), `max_queue_size` (int, default 1000).
+  - Backpressure: use `asyncio.PriorityQueue` bounded by `max_queue_size`. `submit()` raises `BackpressureError` when queue is full.
+  - `async def submit(self, task: Task) -> None` - Enqueue with priority ordering (higher priority = dequeued first).
+  - `async def start(self) -> None` - Launch worker loop. Pulls tasks from queue, executes through RetryPolicy + CircuitBreaker, emits results.
+  - `async def stop(self, graceful: bool = True) -> None` - If graceful, wait for in-flight tasks (up to 30s timeout). Otherwise cancel immediately.
+  - `def on_result(self, callback: Callable[[TaskResult], None])` - Register result callback.
+  - Properties: `pending_count`, `active_count`, `is_running`, `circuit_state`.
+
+  ## 7. Structured Logging
+  - Use `logging.getLogger("task_scheduler")`.
+  - All log messages must be structured: include `task_id`, `task_name`, `attempt`, `duration`, `error`, `circuit_state` as appropriate.
+  - Log at DEBUG for task start, INFO for task success, WARNING for retries, ERROR for final failure, CRITICAL for circuit open.
+
+  ## 8. Custom Exceptions
+  - `CircuitOpenError(Exception)`: include `recovery_seconds_remaining`.
+  - `BackpressureError(Exception)`: include `queue_size` and `max_queue_size`.
+
+  Provide only the Python code for the complete module.
+temperature: 0.3
+max_output_tokens: 6144
+evaluation:
+  type: "code_execution"
+  language: "python"
+  test_cases:
+    - description: "Module imports without errors"
+    - description: "TaskScheduler respects max_concurrency (submit 20 tasks with max_concurrency=3, verify no more than 3 run concurrently)"
+    - description: "BackpressureError raised when queue full"
+    - description: "Retry with exponential backoff (task fails twice then succeeds, verify 3 attempts in result)"
+    - description: "CircuitBreaker opens after failure_threshold failures"
+    - description: "CircuitBreaker transitions OPEN -> HALF_OPEN -> CLOSED on recovery"
+    - description: "Graceful shutdown waits for in-flight tasks"
+    - description: "Priority ordering (CRITICAL tasks execute before LOW tasks)"
+    - description: "Task timeout is enforced"
+    - description: "on_result callback receives TaskResult for every submitted task"

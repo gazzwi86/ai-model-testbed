@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+results/raw/
+results/scored/
+results/charts/
+results/writing/
+results/cost_report.json
+results/routing_matrix.md
+results/strength_profiles.md
+.env
+*.egg-info/
+dist/
+build/

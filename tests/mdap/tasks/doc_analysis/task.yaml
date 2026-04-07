@@ -1,0 +1,30 @@
+name: "doc_analysis"
+task_type: "text"
+description: "Analyse a technical proposal producing executive summary, risk register, and gap analysis"
+
+prompt: |
+  Analyse the provided technical proposal document and produce three deliverables:
+
+  1. **Executive Summary** (200 words max): Capture the key decisions, approach,
+     timeline, and budget. Written for a CTO audience.
+
+  2. **Risk Register**: A structured list of risks with:
+     - Risk description
+     - Likelihood (High/Medium/Low)
+     - Impact (High/Medium/Low)
+     - Mitigation strategy (if mentioned in the document)
+
+  3. **Gap Analysis**: Compare the proposal against the requirements checklist
+     provided. For each requirement, state whether it is:
+     - Fully addressed
+     - Partially addressed (explain what's missing)
+     - Not addressed
+
+  Be specific. Cite section numbers or quotes from the document where possible.
+
+source_document: "tests/fixtures/summarisation/medium_architecture.md"
+requirements_checklist: "tests/mdap/tasks/doc_analysis/requirements_checklist.yaml"
+gold_summary: "tests/mdap/tasks/doc_analysis/gold_summary.md"
+
+temperature: 0.3
+max_output_tokens: 4000

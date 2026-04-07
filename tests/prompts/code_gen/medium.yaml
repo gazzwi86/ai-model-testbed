@@ -1,0 +1,49 @@
+category: code_gen
+tier: medium
+name: "FastAPI JWT auth endpoint"
+description: "Tests ability to produce a FastAPI application with JWT authentication middleware, Pydantic models, error handling, and OpenAPI documentation"
+prompt: |
+  Build a FastAPI application in a single Python file with the following requirements:
+
+  ## Models (Pydantic v2)
+  - `UserCreate`: fields `username` (str, min_length=3, max_length=50), `email` (EmailStr), `password` (str, min_length=8)
+  - `UserResponse`: fields `id` (int), `username` (str), `email` (str), `created_at` (datetime)
+  - `TokenResponse`: fields `access_token` (str), `token_type` (str, default="bearer"), `expires_in` (int)
+  - `ErrorResponse`: fields `detail` (str), `error_code` (str), `timestamp` (datetime)
+
+  ## Endpoints
+  1. `POST /auth/register` - Create a new user. Store users in an in-memory dict. Hash passwords with `hashlib.sha256`. Return `UserResponse` (201) or `ErrorResponse` (409 if username taken).
+  2. `POST /auth/login` - Accept `username` and `password` as form data. Validate credentials. Return `TokenResponse` with a JWT signed using HS256 and a configurable secret (env var `JWT_SECRET`, default `"dev-secret"`). Token expires in 30 minutes.
+  3. `GET /users/me` - Protected endpoint. Extract and validate JWT from `Authorization: Bearer <token>` header. Return the current user's `UserResponse`.
+
+  ## Middleware / Dependencies
+  - Create a `get_current_user` dependency that extracts the JWT, decodes it, and raises `HTTPException(401)` with a JSON body matching `ErrorResponse` if the token is missing, expired, or invalid.
+  - Add a request-ID middleware that attaches a UUID `X-Request-ID` header to every response.
+
+  ## Additional requirements
+  - Use `python-jose` for JWT encoding/decoding.
+  - Include OpenAPI metadata: title="User Auth API", version="1.0.0", description.
+  - All error responses should use a consistent `ErrorResponse` schema.
+  - Include type hints on all functions.
+  - No database; use a module-level `dict[str, dict]` for storage.
+
+  Provide only the Python code.
+temperature: 0.3
+max_output_tokens: 3072
+evaluation:
+  type: "code_execution"
+  language: "python"
+  dependencies:
+    - "fastapi"
+    - "python-jose[cryptography]"
+    - "pydantic[email]"
+    - "httpx"
+    - "uvicorn"
+  test_cases:
+    - description: "App module imports without error"
+    - description: "Register returns 201 with valid data"
+    - description: "Duplicate registration returns 409"
+    - description: "Login returns JWT token"
+    - description: "GET /users/me with valid token returns user"
+    - description: "GET /users/me without token returns 401"
+    - description: "Responses include X-Request-ID header"
