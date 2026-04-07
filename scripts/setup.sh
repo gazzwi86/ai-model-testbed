@@ -41,12 +41,13 @@ echo "This will take a while on first run..."
 
 MODELS=(
     "gemma4:e4b"
-    "gemma4:26b-a4b"
+    "gemma4:26b"
     "gemma4:31b"
     "qwen3.5:9b"
-    "qwen2.5-coder:14b"
+    "qwen3.5:27b"
     "deepseek-r1:14b"
-    "mistral-small3"
+    "deepseek-coder:6.7b"
+    "mistral:7b"
 )
 
 for model in "${MODELS[@]}"; do

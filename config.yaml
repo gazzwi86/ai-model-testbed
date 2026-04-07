@@ -10,12 +10,12 @@ models:
       name: "Gemma 4 E4B"
       params: "4B"
       active_params: "4B"
-      size_gb: 3
+      size_gb: 9.6
       num_ctx: 16384
       notes: "Lightweight, fast. Primary MDAP microagent candidate."
 
-    - id: "gemma4:26b-a4b"
-      name: "Gemma 4 26B A4B"
+    - id: "gemma4:26b"
+      name: "Gemma 4 26B MoE"
       params: "26B MoE"
       active_params: "3.8B"
       size_gb: 15
@@ -26,7 +26,7 @@ models:
       name: "Gemma 4 31B Dense"
       params: "31B"
       active_params: "31B"
-      size_gb: 20
+      size_gb: 19
       num_ctx: 4096
       notes: "Max quality, very tight memory. Context severely limited on 24GB."
 
@@ -38,13 +38,13 @@ models:
       num_ctx: 16384
       notes: "Hybrid thinking. Good all-rounder and MDAP candidate."
 
-    - id: "qwen2.5-coder:14b"
-      name: "Qwen 2.5 Coder 14B"
-      params: "14B"
-      active_params: "14B"
-      size_gb: 9
-      num_ctx: 8192
-      notes: "Coding specialist."
+    - id: "qwen3.5:27b"
+      name: "Qwen 3.5 27B"
+      params: "27B"
+      active_params: "27B"
+      size_gb: 17
+      num_ctx: 4096
+      notes: "Large Qwen. Strong reasoning. Context limited on 24GB."
 
     - id: "deepseek-r1:14b"
       name: "DeepSeek R1 Distill 14B"
@@ -54,11 +54,19 @@ models:
       num_ctx: 8192
       notes: "Reasoning specialist. CoT."
 
-    - id: "mistral-small3"
-      name: "Mistral Small 3"
+    - id: "deepseek-coder:6.7b"
+      name: "DeepSeek Coder 6.7B"
+      params: "6.7B"
+      active_params: "6.7B"
+      size_gb: 3.8
+      num_ctx: 16384
+      notes: "Coding specialist. Fast."
+
+    - id: "mistral:7b"
+      name: "Mistral 7B"
       params: "7B"
       active_params: "7B"
-      size_gb: 5
+      size_gb: 4.4
       num_ctx: 16384
       notes: "Fast, good instruction following."
 
