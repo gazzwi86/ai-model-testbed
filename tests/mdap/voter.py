@@ -24,16 +24,22 @@ from tests.evaluators.embedding_utils import (
 
 logger = logging.getLogger(__name__)
 
-# Module-level Anthropic client cache for pairwise voting
-_anthropic_client = None
-
-
-def _get_anthropic_client():
-    global _anthropic_client
-    if _anthropic_client is None:
-        import anthropic
-        _anthropic_client = anthropic.Anthropic()
-    return _anthropic_client
+async def _claude_query(prompt: str, model: str = "claude-sonnet-4-6") -> str:
+    """Query Claude via agent SDK."""
+    import claude_agent_sdk
+    options = claude_agent_sdk.ClaudeAgentOptions(
+        model=model, max_turns=1, permission_mode="bypassPermissions",
+    )
+    result = ""
+    async for event in claude_agent_sdk.query(prompt=prompt, options=options):
+        if isinstance(event, claude_agent_sdk.AssistantMessage):
+            for block in event.content:
+                if isinstance(block, claude_agent_sdk.TextBlock):
+                    result += block.text
+        elif isinstance(event, claude_agent_sdk.ResultMessage):
+            if event.result and not result:
+                result = event.result
+    return result
 
 
 def _run_tests(code: str, test_assertions: list[str]) -> list[bool]:
@@ -157,7 +163,6 @@ def pairwise_rank_vote(
     if len(candidates) == 1:
         return candidates[0], {"method": "pairwise_rank", "winner_index": 0}
 
-    client = _get_anthropic_client()
     wins = [0] * len(candidates)
     comparisons = []
 
@@ -180,13 +185,9 @@ def pairwise_rank_vote(
             """)
 
             try:
-                response = client.messages.create(
-                    model=judge_model,
-                    max_tokens=10,
-                    temperature=0,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                answer = response.content[0].text.strip().upper()
+                import asyncio
+                answer_text = asyncio.run(_claude_query(prompt, judge_model))
+                answer = answer_text.strip().upper()
                 if "A" in answer:
                     wins[i] += 1
                     comparisons.append({"a": i, "b": j, "winner": "A"})

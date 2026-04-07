@@ -43,7 +43,13 @@
       "WebFetch(domain:deepwiki.com)",
       "WebFetch(domain:github.com)",
       "Bash(cp -a local-llm-benchmark/.git .)",
-      "Bash(rsync -a --exclude='.git' --exclude='.venv' local-llm-benchmark/ .)"
+      "Bash(rsync -a --exclude='.git' --exclude='.venv' local-llm-benchmark/ .)",
+      "Bash(.venv/bin/pip show:*)",
+      "Bash(.venv/bin/uv pip:*)",
+      "Bash(curl -s \"https://pypi.org/pypi/claude-agent-sdk/json\")",
+      "Bash(curl -s \"https://pypi.org/pypi/claude-code-sdk/json\")",
+      "Bash(npm view:*)",
+      "WebFetch(domain:www.alif.web.id)"
     ]
   }
 }

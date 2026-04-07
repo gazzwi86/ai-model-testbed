@@ -8,7 +8,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-import anthropic
+import claude_agent_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -88,25 +88,34 @@ class Decomposer:
         input_price_per_mtok: float = 5.00,
         output_price_per_mtok: float = 25.00,
     ):
-        self.client = anthropic.Anthropic()
         self.model = model
         self.input_price_per_mtok = input_price_per_mtok
         self.output_price_per_mtok = output_price_per_mtok
 
-    def decompose(self, task_description: str) -> DecompositionResult:
+    async def decompose(self, task_description: str) -> DecompositionResult:
         """Decompose a task into subtasks using Opus."""
-        prompt = DECOMPOSITION_PROMPT.format(task_description=task_description)
+        prompt_text = DECOMPOSITION_PROMPT.format(task_description=task_description)
 
-        response = self.client.messages.create(
+        options = claude_agent_sdk.ClaudeAgentOptions(
             model=self.model,
-            max_tokens=8192,
-            temperature=0.2,
-            messages=[{"role": "user", "content": prompt}],
+            max_turns=1,
+            permission_mode="bypassPermissions",
         )
 
-        raw = response.content[0].text
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
+        raw = ""
+        input_tokens = 0
+        output_tokens = 0
+        async for event in claude_agent_sdk.query(prompt=prompt_text, options=options):
+            if isinstance(event, claude_agent_sdk.AssistantMessage):
+                for block in event.content:
+                    if isinstance(block, claude_agent_sdk.TextBlock):
+                        raw += block.text
+            elif isinstance(event, claude_agent_sdk.ResultMessage):
+                if event.result and not raw:
+                    raw = event.result
+                if event.usage:
+                    input_tokens = getattr(event.usage, 'input_tokens', 0) or 0
+                    output_tokens = getattr(event.usage, 'output_tokens', 0) or 0
         from harness.metrics import compute_frontier_cost
         from harness.config_loader import FrontierModel
         _model = FrontierModel(
