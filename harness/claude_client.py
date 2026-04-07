@@ -21,7 +21,7 @@ class ClaudeResponse:
 
 class ClaudeClient:
     def __init__(self):
-        self.client = anthropic.Anthropic()
+        self.client = anthropic.AsyncAnthropic()
 
     async def chat(
         self,
@@ -43,9 +43,7 @@ class ClaudeClient:
         if system:
             kwargs["system"] = system
 
-        # Use sync client in async context — anthropic SDK handles this fine
-        # for our throughput needs. Switch to AsyncAnthropic if needed.
-        response = self.client.messages.create(**kwargs)
+        response = await self.client.messages.create(**kwargs)
 
         elapsed_ms = (time.monotonic() - start) * 1000
 

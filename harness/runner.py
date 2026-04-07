@@ -148,8 +148,30 @@ def save_result(result: dict) -> Path:
     return path
 
 
+async def run_mdap(config: Config) -> None:
+    """Run MDAP benchmark tests."""
+    from tests.mdap.runner import run_mdap_benchmark
+    from pathlib import Path
+
+    mdap_tasks_dir = Path(__file__).parent.parent / "tests" / "mdap" / "tasks"
+    for task_dir in sorted(mdap_tasks_dir.iterdir()):
+        task_yaml = task_dir / "task.yaml"
+        if task_yaml.exists():
+            logger.info("=== MDAP: %s ===", task_dir.name)
+            try:
+                results = await run_mdap_benchmark(task_yaml, config)
+                logger.info("  Completed %d MDAP runs for %s", len(results), task_dir.name)
+            except Exception as e:
+                logger.error("  MDAP failed for %s: %s", task_dir.name, e)
+
+
 async def run_all(args: argparse.Namespace) -> None:
     config = load_config()
+
+    if args.mdap_only:
+        await run_mdap(config)
+        return
+
     prompts = load_prompts(category=args.category, tier=args.tier)
 
     if not prompts:

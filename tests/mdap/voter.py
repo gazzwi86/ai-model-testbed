@@ -238,13 +238,15 @@ def hybrid_vote(
             candidates, task_description, judge_model
         )
 
+        emb_idx = emb_details.get("winner_index")
+        pair_idx = pair_details.get("winner_index")
         details = {
             "method": "hybrid_text",
             "embedding": emb_details,
             "pairwise_rank": pair_details,
-            "agreement": emb_details["winner_index"] == pair_details["winner_index"],
+            "agreement": emb_idx == pair_idx if emb_idx is not None and pair_idx is not None else None,
         }
-        return pair_winner, details
+        return pair_winner if pair_winner is not None else emb_winner, details
 
     else:
         return embedding_vote(candidates, embedding_model)
