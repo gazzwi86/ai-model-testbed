@@ -1,49 +1,189 @@
 category: code_gen
 tier: medium
-name: "FastAPI JWT auth endpoint"
-description: "Tests ability to produce a FastAPI application with JWT authentication middleware, Pydantic models, error handling, and OpenAPI documentation"
+name: "Event sourcing system with SQLite"
+description: "Tests ability to implement a complete event sourcing system with event store, aggregate roots, projections, optimistic concurrency, snapshots, and event versioning"
 prompt: |
-  Build a FastAPI application in a single Python file with the following requirements:
+  Implement a Python event sourcing framework in a single file (`eventsourcing.py`). Use only the standard library plus `sqlite3`. The system must be fully functional and architecturally sound.
 
-  ## Models (Pydantic v2)
-  - `UserCreate`: fields `username` (str, min_length=3, max_length=50), `email` (EmailStr), `password` (str, min_length=8)
-  - `UserResponse`: fields `id` (int), `username` (str), `email` (str), `created_at` (datetime)
-  - `TokenResponse`: fields `access_token` (str), `token_type` (str, default="bearer"), `expires_in` (int)
-  - `ErrorResponse`: fields `detail` (str), `error_code` (str), `timestamp` (datetime)
+  ## 1. Event Infrastructure
 
-  ## Endpoints
-  1. `POST /auth/register` - Create a new user. Store users in an in-memory dict. Hash passwords with `hashlib.sha256`. Return `UserResponse` (201) or `ErrorResponse` (409 if username taken).
-  2. `POST /auth/login` - Accept `username` and `password` as form data. Validate credentials. Return `TokenResponse` with a JWT signed using HS256 and a configurable secret (env var `JWT_SECRET`, default `"dev-secret"`). Token expires in 30 minutes.
-  3. `GET /users/me` - Protected endpoint. Extract and validate JWT from `Authorization: Bearer <token>` header. Return the current user's `UserResponse`.
+  ### EventMeta dataclass
+  ```python
+  @dataclass(frozen=True)
+  class EventMeta:
+      event_id: str            # UUID4
+      aggregate_id: str        # UUID4
+      aggregate_type: str      # e.g., "BankAccount"
+      event_type: str          # e.g., "MoneyDeposited"
+      version: int             # Aggregate version after this event
+      schema_version: int      # Event schema version for upcasting (default 1)
+      timestamp: datetime      # UTC
+      correlation_id: str | None = None
+      causation_id: str | None = None
+      metadata: dict[str, Any] = field(default_factory=dict)
+  ```
 
-  ## Middleware / Dependencies
-  - Create a `get_current_user` dependency that extracts the JWT, decodes it, and raises `HTTPException(401)` with a JSON body matching `ErrorResponse` if the token is missing, expired, or invalid.
-  - Add a request-ID middleware that attaches a UUID `X-Request-ID` header to every response.
+  ### DomainEvent base class
+  All domain events inherit from this. It holds `meta: EventMeta` and `data: dict[str, Any]`.
+  Provide a `to_dict()` method for serialization and a `@classmethod from_dict(cls, d)` for deserialization.
 
-  ## Additional requirements
-  - Use `python-jose` for JWT encoding/decoding.
-  - Include OpenAPI metadata: title="User Auth API", version="1.0.0", description.
-  - All error responses should use a consistent `ErrorResponse` schema.
-  - Include type hints on all functions.
-  - No database; use a module-level `dict[str, dict]` for storage.
+  ## 2. Event Upcaster Registry
 
-  Provide only the Python code.
+  Implement an `EventUpcasterRegistry` that allows registering upcaster functions:
+  ```python
+  registry.register("MoneyDeposited", from_version=1, to_version=2, upcaster_fn)
+  ```
+
+  When loading events, the registry applies upcasters in chain: if stored event is v1 and current schema is v3, it applies v1->v2, then v2->v3 sequentially. Each upcaster function takes `data: dict` and returns `dict`.
+
+  ## 3. SQLite Event Store
+
+  ### EventStore class
+  Constructor takes a `sqlite3.Connection`. Creates the following tables if they don't exist:
+
+  ```sql
+  events (
+      event_id TEXT PRIMARY KEY,
+      aggregate_id TEXT NOT NULL,
+      aggregate_type TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      schema_version INTEGER NOT NULL,
+      timestamp TEXT NOT NULL,
+      correlation_id TEXT,
+      causation_id TEXT,
+      metadata TEXT NOT NULL,  -- JSON
+      data TEXT NOT NULL,       -- JSON
+      UNIQUE(aggregate_id, version)  -- Optimistic concurrency enforcement
+  )
+
+  snapshots (
+      aggregate_id TEXT NOT NULL,
+      aggregate_type TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      state TEXT NOT NULL,      -- JSON serialized aggregate state
+      timestamp TEXT NOT NULL,
+      PRIMARY KEY (aggregate_id)
+  )
+  ```
+
+  Methods:
+  - `append(self, events: list[DomainEvent], expected_version: int) -> None`
+    Appends events atomically within a transaction. If any event's `version` conflicts with an existing row (same `aggregate_id` + `version`), raise `ConcurrencyError` with details about the conflict. This is the optimistic concurrency control mechanism.
+
+  - `load_events(self, aggregate_id: str, after_version: int = 0) -> list[DomainEvent]`
+    Load events for an aggregate, ordered by version. If `after_version > 0`, load only events after that version (used when loading from snapshot). Apply upcasting via the `EventUpcasterRegistry`.
+
+  - `load_all_events(self, event_types: list[str] | None = None, after_position: int = 0, limit: int = 1000) -> list[DomainEvent]`
+    Load events across all aggregates for projection rebuilding. Filter by event types if provided. Use ROWID as position for ordering.
+
+  - `save_snapshot(self, aggregate_id: str, aggregate_type: str, version: int, state: dict) -> None`
+    Save or replace the snapshot for an aggregate.
+
+  - `load_snapshot(self, aggregate_id: str) -> tuple[int, dict] | None`
+    Load the latest snapshot. Returns `(version, state)` or `None`.
+
+  ## 4. Aggregate Root Base Class
+
+  ```python
+  class AggregateRoot(ABC):
+  ```
+
+  - `id: str` - The aggregate ID
+  - `version: int` - Current version (starts at 0, incremented per event)
+  - `_pending_events: list[DomainEvent]` - Events raised but not yet persisted
+
+  Methods:
+  - `_raise_event(self, event_type: str, data: dict, schema_version: int = 1) -> None`
+    Creates a `DomainEvent` with proper metadata, appends to `_pending_events`, increments version, and calls the `_apply` method immediately (so the aggregate's state reflects the event).
+
+  - `@abstractmethod _apply(self, event: DomainEvent) -> None`
+    Subclasses implement this to mutate state based on event type and data. Must handle all event types for the aggregate.
+
+  - `_take_pending_events(self) -> list[DomainEvent]`
+    Returns and clears the pending events list.
+
+  - `@classmethod _from_events(cls, aggregate_id: str, events: list[DomainEvent]) -> Self`
+    Reconstitute an aggregate by replaying events. Create a new instance, then call `_apply` for each event.
+
+  - `_get_snapshot_state(self) -> dict`
+    Override in subclasses to return serializable state for snapshotting.
+
+  - `@classmethod _from_snapshot(cls, aggregate_id: str, version: int, state: dict) -> Self`
+    Override in subclasses to reconstitute from a snapshot.
+
+  ## 5. Repository
+
+  ```python
+  class Repository(Generic[T]):
+  ```
+  Constructor takes `EventStore`, `aggregate_class: type[T]`, `snapshot_interval: int = 50`.
+
+  Methods:
+  - `def load(self, aggregate_id: str) -> T`
+    Load snapshot if available, then load events after the snapshot version, replay them onto the aggregate. If no snapshot exists, load all events and replay from scratch. Raise `AggregateNotFoundError` if no events exist.
+
+  - `def save(self, aggregate: T) -> None`
+    Get pending events from the aggregate. Call `event_store.append()` with `expected_version = aggregate.version - len(pending_events)`. If `aggregate.version` is a multiple of `snapshot_interval`, save a snapshot.
+
+  ## 6. Projection Support
+
+  ```python
+  class Projection(ABC):
+      @abstractmethod
+      def handle(self, event: DomainEvent) -> None: ...
+
+      @abstractmethod
+      def reset(self) -> None: ...
+  ```
+
+  ```python
+  class ProjectionEngine:
+  ```
+  Constructor takes `EventStore` and a list of `Projection` instances.
+
+  Methods:
+  - `def rebuild_all(self) -> None`
+    Reset all projections, then load all events from the store in order and pass each to all projections.
+
+  - `def process_new_events(self, batch_size: int = 100) -> int`
+    Track the last processed position per projection. Load new events after that position and process them. Return the number of events processed.
+
+  ## 7. Custom Exceptions
+  - `ConcurrencyError(Exception)`: `aggregate_id`, `expected_version`, `actual_version`
+  - `AggregateNotFoundError(Exception)`: `aggregate_id`, `aggregate_type`
+
+  ## 8. Example Aggregate (include in the module)
+
+  Implement a `BankAccount` aggregate with:
+  - `create(cls, account_id: str, owner: str, initial_balance: Decimal) -> BankAccount` (class method)
+  - `deposit(self, amount: Decimal, description: str) -> None`
+  - `withdraw(self, amount: Decimal, description: str) -> None` (raises `InsufficientFundsError` if balance < amount)
+  - `close(self) -> None` (raises `InvalidOperationError` if balance != 0)
+
+  Event types: `AccountCreated`, `MoneyDeposited`, `MoneyWithdrawn`, `AccountClosed`
+
+  The `_apply` method must handle all four event types and update `owner`, `balance`, `is_closed` fields.
+
+  Provide only the Python code for the complete module.
 temperature: 0.3
-max_output_tokens: 3072
+max_output_tokens: 8192
 evaluation:
   type: "code_execution"
   language: "python"
-  dependencies:
-    - "fastapi"
-    - "python-jose[cryptography]"
-    - "pydantic[email]"
-    - "httpx"
-    - "uvicorn"
   test_cases:
-    - description: "App module imports without error"
-    - description: "Register returns 201 with valid data"
-    - description: "Duplicate registration returns 409"
-    - description: "Login returns JWT token"
-    - description: "GET /users/me with valid token returns user"
-    - description: "GET /users/me without token returns 401"
-    - description: "Responses include X-Request-ID header"
+    - description: "Module imports without errors and all classes are accessible"
+    - description: "BankAccount can be created, deposit, withdraw, and events are recorded"
+    - description: "Repository save and load round-trips correctly (aggregate state preserved)"
+    - description: "Optimistic concurrency control: ConcurrencyError raised on version conflict"
+    - description: "Snapshot is saved at correct intervals and loading uses snapshot + subsequent events"
+    - description: "Event upcasting works: register v1->v2 upcaster, store v1 event, load applies upcaster"
+    - description: "Event upcasting chains: v1->v2->v3 applied sequentially"
+    - description: "InsufficientFundsError raised when withdrawing more than balance"
+    - description: "AccountClosed prevents further operations"
+    - description: "Projection rebuilding processes all events in order"
+    - description: "ProjectionEngine.process_new_events only processes unprocessed events"
+    - description: "Repository.load raises AggregateNotFoundError for nonexistent aggregate"
+    - description: "Multiple aggregates can coexist in the same event store independently"
+    - description: "Events have correct correlation_id and causation_id propagation"
+    - description: "load_all_events filters by event_type correctly"

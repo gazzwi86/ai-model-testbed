@@ -1,74 +1,145 @@
 category: writing
 tier: hard
-name: "Thought leadership on local AI costs"
-description: "Tests ability to write a 2,000-word thought leadership piece with original analysis, counterarguments, thesis, and recommendations on local AI cost reduction"
+name: "Architecture Decision Record for microservices migration"
+description: "Tests ability to write a comprehensive ADR for migrating a monolithic Django app to event-driven microservices, including context, trade-offs, decision analysis, consequences, and migration plan with risk mitigations"
 prompt: |
-  Write a 2,000-word thought leadership article titled "The Hidden Economics of Local AI: Why Running Models On-Premise Might Cost Less Than You Think."
+  Write an Architecture Decision Record (ADR) for migrating from a monolithic Django application to an event-driven microservices architecture. This ADR will be reviewed by the VP of Engineering, the CTO, and the engineering team leads. It must be thorough enough to serve as the authoritative reference document for this migration.
 
-  This article is for publication on a respected technology blog (think: InfoQ, Pragmatic Engineer, or a reputable company engineering blog). The audience is CTOs, VPs of Engineering, and senior architects at companies spending $50K-$500K/month on cloud AI inference.
+  ## Context You Must Incorporate
 
-  ## Requirements
+  ### Current System
+  - **Application**: Monolithic Django application (Python 3.11, Django 4.2)
+  - **Codebase**: 200,000 lines of Python code across 45 Django apps
+  - **Database**: Single PostgreSQL 15 instance (2.1TB data, 380 tables, 120 database views, 45 stored procedures)
+  - **Traffic**: 500,000 DAU, 8,000 requests/second peak, p99 latency currently at 320ms (SLA target: 200ms -- currently in violation)
+  - **Deployment**: Weekly releases via GitHub Actions, 30-minute deployment window, no canary/blue-green capability. Rollbacks require database migration reversals and take 45-60 minutes.
+  - **Infrastructure**: 12 Django application servers behind an AWS ALB, 2 Celery worker clusters (8 workers each), single Redis instance for caching and Celery broker, all in us-east-1
 
-  ### Thesis
-  Develop and defend a specific thesis: that for companies with predictable, high-volume AI inference workloads, local/on-premise model hosting (using consumer and enterprise GPUs) has reached a cost crossover point where it is significantly cheaper than cloud API calls or cloud GPU instances, but only under specific conditions that you must clearly define.
+  ### Pain Points (Ranked by Engineering Survey)
+  1. **Deploy fear** (cited by 13/15 engineers): Any change can break unrelated features due to shared state and implicit coupling between Django apps. The test suite takes 47 minutes. Engineers avoid deploying on Fridays (unofficial policy).
+  2. **Scaling bottleneck** (cited by 11/15): The product catalog and search functionality consumes 60% of database CPU. Cannot scale this independently. Adding read replicas helped but introduced consistency bugs.
+  3. **Development velocity** (cited by 10/15): Merge conflicts in shared models.py files are constant. The User model has 47 fields and is imported by 38 of 45 apps. Onboarding a new engineer to "productive contributor" takes 8 weeks.
+  4. **Reliability** (cited by 9/15): Celery task failures in the email/notification system cascade to the payment processing queue because they share a Redis broker. Last month, a bulk email campaign caused 12 minutes of payment processing delays.
 
-  ### Original Analysis
-  Include a worked cost comparison with realistic numbers:
-  - Cloud scenario: Company running 10M inference requests/day using a hosted API (e.g., a GPT-4-class model at representative per-token pricing). Calculate monthly cost.
-  - Local scenario: Same workload served by on-premise hardware (specify GPU models, server configuration, power, cooling, staffing). Calculate TCO over 18 months including hardware depreciation.
-  - Show the breakeven point and sensitivity to utilisation rate.
-  - Acknowledge where the numbers are estimates and what assumptions drive the conclusion.
+  ### Organization
+  - **Team size**: 15 engineers (4 senior, 6 mid, 5 junior) + 1 engineering manager + 1 SRE
+  - **Teams** (recently reorganized into domain teams, still learning boundaries):
+    - Product & Catalog (4 engineers): product listings, search, categories, inventory
+    - Orders & Payments (4 engineers): checkout, payment processing, order lifecycle
+    - User & Identity (3 engineers): authentication, profiles, permissions, notification preferences
+    - Platform (4 engineers): CI/CD, infrastructure, monitoring, shared libraries
+  - **Timeline**: 9-month budget approved. After month 9, company enters a funding round and all architectural changes freeze for investor due diligence.
+  - **Budget**: $180K total for additional infrastructure, tooling, and training (not headcount)
 
-  ### Counterarguments (at least 3)
-  Address and respond to each:
-  1. "Local AI requires ML engineering talent you probably don't have"
-  2. "GPU hardware depreciates rapidly and the next generation makes your investment obsolete"
-  3. "Cloud providers offer capabilities (fine-tuning APIs, safety filters, compliance certifications) that are expensive to replicate locally"
-  4. Optionally add a fourth counterargument of your choosing
+  ### Technical Constraints
+  - Must maintain backward compatibility with 3 mobile apps (iOS, Android, React Native) consuming the REST API. Breaking API changes require 6-week deprecation periods.
+  - PCI DSS compliance for payment processing. Current scope is the monolith + database. Any new service touching payment data must be separately audited ($15K per audit).
+  - SOC 2 Type II audit scheduled for month 7. Architecture must be stable enough for auditor walkthrough.
+  - Team has no production Kubernetes experience. Platform team has experimented with it locally.
 
-  ### Conditions and Caveats
-  Clearly define when local AI does and does not make sense. Include:
-  - Minimum inference volume threshold
-  - Workload predictability requirements
-  - Model size constraints (what fits on local hardware vs. what doesn't)
-  - Regulatory considerations that might favor local deployment
-  - The hybrid approach: which workloads to keep in cloud vs. move local
+  ## ADR Requirements
 
-  ### Recommendations
-  Provide 3-5 actionable recommendations for a CTO evaluating this decision, including a suggested evaluation framework or decision tree.
+  Write the ADR with the following sections:
+
+  ### 1. Title
+  Short, descriptive title following the "ADR-NNN: [Decision]" format.
+
+  ### 2. Status
+  Proposed (with date).
+
+  ### 3. Context
+  Describe the problem that motivates this decision. Reference the specific pain points, metrics, and constraints above. This section should make the case for WHY a change is needed, not WHAT the change should be.
+
+  ### 4. Decision Drivers
+  Ranked list of the factors that most influence the decision, with weights indicating relative importance. Include both technical and organizational drivers.
+
+  ### 5. Options Considered
+  Analyze at least 4 options:
+  - **Option A**: Stay with monolith, invest in modularization (strangler fig internally)
+  - **Option B**: Modular monolith with strict module boundaries and separate databases
+  - **Option C**: Full microservices migration (event-driven)
+  - **Option D**: Hybrid -- extract 2-3 critical domains as services, keep the rest as a modular monolith
+
+  For each option, provide:
+  - Description of the approach
+  - Estimated timeline to first measurable improvement
+  - Estimated cost (infrastructure + opportunity cost)
+  - Pros (at least 3)
+  - Cons (at least 3)
+  - Risk level (LOW/MEDIUM/HIGH/VERY HIGH) with justification
+  - Team skill gap analysis
+
+  ### 6. Decision Outcome
+  State the chosen option and provide detailed justification referencing the decision drivers, constraints, team capabilities, and timeline. Be specific about WHY this option over the others, not generic.
+
+  ### 7. Architecture Overview
+  Describe the target architecture at a level of detail sufficient for engineers to begin design work:
+  - Service boundaries (which Django apps map to which services)
+  - Communication patterns (sync vs. async, API gateway, event bus)
+  - Data architecture (database per service, shared data, event sourcing where appropriate)
+  - Authentication and authorization across services
+  - Observability strategy
+
+  ### 8. Consequences
+
+  #### Positive
+  At least 5 specific positive consequences with measurable targets.
+
+  #### Negative
+  At least 5 specific negative consequences (be honest about what gets harder).
+
+  #### Risks
+  Top 5 risks with likelihood, impact, mitigation strategy, and owner.
+
+  ### 9. Migration Plan
+  Month-by-month plan for the 9-month window. For each month:
+  - Objectives
+  - Deliverables
+  - Team assignments
+  - Decision gates / go-no-go criteria
+  - Key risks for that phase
+
+  Include explicit "off-ramp" points where the migration can be paused or rolled back without leaving the system in a broken state.
+
+  ### 10. What We Explicitly Will NOT Do
+  List at least 5 things that are out of scope and WHY they are deferred. This prevents scope creep.
+
+  ### 11. Success Metrics
+  Define 5-7 metrics with specific targets, measurement method, and measurement frequency. Include leading indicators (not just lagging).
+
+  ### 12. References and Prior Art
+  Reference relevant industry case studies, technical resources, or internal documents.
 
   ## Style Guidelines
-  - Authoritative and analytical, not salesy
-  - Support claims with specific numbers (realistic, clearly labelled as estimates where appropriate)
-  - Acknowledge uncertainty and complexity rather than oversimplifying
-  - Use clear section headings
-  - Short paragraphs (2-4 sentences)
-  - No marketing cliches, no "game-changer" or "paradigm shift" language
-  - Include at least one analogy that makes a complex point more accessible
-  - The piece should feel like it was written by someone who has actually done this, not someone summarising blog posts about it
+  - Write in clear, direct prose. No marketing language.
+  - Use specific numbers from the context, not vague generalities.
+  - Be honest about trade-offs. An ADR that only presents positives is not credible.
+  - Use tables for structured comparisons.
+  - The document should be 2,500-3,500 words.
+  - Format in Markdown.
 temperature: 0.7
-max_output_tokens: 4096
+max_output_tokens: 8192
 evaluation:
   type: "writing"
   criteria:
-    - name: "word_count"
-      description: "Approximately 2,000 words (1,800-2,200 acceptable range)"
-      weight: 0.05
-    - name: "thesis_clarity"
-      description: "Clear, specific, defensible thesis stated early and supported throughout. Not wishy-washy 'it depends' without taking a position."
+    - name: "context_fidelity"
+      description: "ADR accurately references specific numbers, constraints, and pain points from the provided context. Does not fabricate data or ignore constraints."
       weight: 0.15
-    - name: "original_analysis"
-      description: "Worked cost comparison with specific, realistic numbers for both cloud and local scenarios. Shows breakeven point. Acknowledges assumptions."
-      weight: 0.25
-    - name: "counterarguments"
-      description: "Addresses at least 3 counterarguments with substantive responses, not strawman dismissals"
+    - name: "options_analysis_depth"
+      description: "All 4 options analyzed with genuine pros/cons (not strawman arguments for rejected options). Trade-offs are specific to this scenario, not generic."
       weight: 0.20
-    - name: "nuance_and_caveats"
-      description: "Clearly defines when local AI does and does not make sense. Does not oversimplify."
+    - name: "decision_justification"
+      description: "Decision outcome is well-justified with explicit reasoning about why alternatives were rejected for THIS specific situation (team size, timeline, budget, skill gaps)."
       weight: 0.15
-    - name: "recommendations"
-      description: "Actionable, specific recommendations including evaluation framework"
+    - name: "migration_plan_realism"
+      description: "Month-by-month plan is realistic given 15 engineers, mixed seniority levels, no K8s experience, and a 9-month window. Includes off-ramps and go/no-go gates."
+      weight: 0.15
+    - name: "risk_honesty"
+      description: "Risks and negative consequences are genuine, not token mentions. Includes at least one risk that questions whether the migration should happen at all."
       weight: 0.10
+    - name: "technical_specificity"
+      description: "Architecture overview is specific enough to begin design work: names specific technologies, defines service boundaries, addresses data migration, and handles the PostgreSQL decomposition challenge."
+      weight: 0.15
     - name: "writing_quality"
-      description: "Authoritative tone, no cliches, specific examples, good structure, feels written by a practitioner"
+      description: "Clear, professional prose. Proper ADR structure. Good use of tables for comparisons. Appropriate length (2,500-3,500 words). No cliches or filler."
       weight: 0.10

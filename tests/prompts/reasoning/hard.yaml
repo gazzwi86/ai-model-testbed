@@ -1,68 +1,120 @@
 category: reasoning
 tier: hard
-name: "Monolith-to-microservices migration"
-description: "Tests ability to produce a nuanced, constraint-aware migration recommendation for a complex real-world scenario with competing requirements"
+name: "Real-time fraud detection architecture"
+description: "Tests ability to design a multi-constraint data architecture for real-time fraud detection with specific performance, compliance, deployment, and budget requirements"
 prompt: |
-  You are a principal architect consulting for a mid-size fintech company. Produce a migration recommendation based on the following constraints:
+  You are a principal data architect consulting for a large payment processor. Design the data architecture for a real-time fraud detection system. Your design must satisfy ALL of the following constraints simultaneously -- this is a hard optimization problem, not a greenfield brainstorm.
 
-  ## Current State
-  - **Codebase**: 500,000 LOC Java monolith (Spring Boot), deployed as a single WAR on 8 Tomcat instances behind an F5 load balancer
-  - **Database**: Single Oracle 19c instance (4TB data, 200+ tables, 50+ stored procedures containing business logic)
-  - **Traffic**: 2 million DAU, 15,000 requests/sec peak, current p99 latency 180ms (SLA is 200ms)
-  - **Deployment**: Bi-weekly releases via Jenkins, 45-minute deployment window with 10-minute rollback capability
-  - **Pain points**: Deployment coordination across 4 teams is the #1 complaint. A change in payments code requires full regression testing (6 hours). Developer onboarding takes 3 months.
+  ## System Requirements
 
-  ## Teams (4 teams, ~40 engineers total)
-  - **Payments** (12 engineers): Handles transaction processing, settlement, reconciliation. Highest change velocity (8-10 PRs/week). Most critical domain - any outage is revenue-impacting.
-  - **Identity** (8 engineers): Authentication, KYC, fraud detection. Moderate change velocity (3-4 PRs/week). Subject to regulatory compliance requirements (PCI-DSS, SOC2).
-  - **Lending** (10 engineers): Loan origination, underwriting, servicing. Low change velocity (2-3 PRs/week) but complex business logic with many edge cases.
-  - **Platform** (10 engineers): Shared infrastructure, CI/CD, monitoring, developer tooling. Currently spends 60% of time on deployment coordination and incident response.
+  ### Performance
+  - **Throughput**: 100,000 transactions/second sustained, 250,000/second peak (Black Friday)
+  - **Scoring latency**: p50 < 10ms, p99 < 50ms for fraud score computation
+  - **Feature computation**: Must compute features from a 30-day lookback window per cardholder (e.g., "number of transactions in last 24h", "average transaction amount in last 7 days", "number of distinct merchants in last 30 days")
+  - **Model update latency**: New model deployments must take effect within 5 minutes
+  - **Alert latency**: Suspicious transaction alerts must reach the fraud operations team within 2 seconds
 
-  ## Constraints
-  - **Deadline**: Board has approved 6 months of migration effort. After 6 months, the company enters a regulatory audit period where architectural changes are frozen for 3 months.
-  - **Budget**: $800K total (covering additional infrastructure, tooling, and any external consulting - not headcount, which is fixed)
-  - **SLA**: p99 latency must not exceed 200ms at any point during migration. Zero tolerance for data inconsistency in financial transactions.
-  - **Compliance**: PCI-DSS scope must not expand. Any new service handling card data must be in-scope and audited.
+  ### Data Requirements
+  - **Transaction schema**: card_hash, merchant_id, amount, currency, timestamp, geo_location, device_fingerprint, is_card_present, mcc_code, plus 20+ additional fields
+  - **Feature store**: Must maintain per-cardholder aggregated features (rolling windows: 1h, 6h, 24h, 7d, 30d) updated in real-time
+  - **Historical data**: 2 years of transaction history (~6 trillion records) for model training
+  - **Reference data**: Merchant risk scores, BIN tables, geo risk scores, known fraud patterns
+
+  ### Compliance (non-negotiable)
+  - **GDPR Article 17**: Right to erasure -- must be able to delete all data for a specific cardholder within 72 hours, across ALL stores (streaming, feature store, historical, model training data, logs)
+  - **PCI DSS Level 1**: No plaintext PANs in any data store. Tokenization or irreversible hashing required. Audit trail for all access to cardholder data.
+  - **Data residency**: EU cardholder data must be processed and stored in EU regions. US data in US regions. Other regions can be processed in either.
+
+  ### Deployment
+  - **Multi-region active-active**: Transactions must be scored in the region where they originate (EU transactions scored in EU, US in US)
+  - **Cross-region consistency**: A cardholder's feature state must be consistent across regions within 500ms (eventual consistency acceptable)
+  - **Availability**: 99.99% uptime SLA (52.6 minutes/year max downtime)
+  - **Failover**: If one region fails, the other must absorb full traffic within 30 seconds with degraded but functional scoring
+
+  ### Budget
+  - **Infrastructure budget**: $50,000/month total across all regions
+  - **Headcount**: 4 data engineers, 2 ML engineers, 1 SRE (this is the team you have, not a wishlist)
+  - **Timeline**: MVP scoring 80% of traffic within 4 months, full deployment within 8 months
 
   ## Your Task
 
-  Produce a detailed recommendation covering:
+  Produce a detailed architecture design covering:
 
-  1. **Migration strategy**: Full microservices, modular monolith, or hybrid? Justify with reference to the specific constraints. If incremental, which domain extracts first and why?
+  ### 1. Stream Processing Pipeline
+  Compare and choose between:
+  - Apache Kafka + Apache Flink
+  - Apache Kafka + Kafka Streams
+  - Amazon Kinesis + AWS Lambda
+  - Apache Pulsar + custom consumers
+  Justify your choice based on the specific constraints above. Specify partition strategy, consumer group topology, and exactly-once semantics approach.
 
-  2. **Sequencing plan**: Month-by-month plan for the 6-month window. What is delivered at each stage? What are the decision gates?
+  ### 2. Feature Store Architecture
+  Design the real-time feature store that maintains per-cardholder aggregates. Address:
+  - Storage engine choice (Redis, Apache Druid, ScyllaDB, DynamoDB, custom) with justification
+  - How rolling window aggregates are computed and updated incrementally
+  - Memory/storage estimates for 500M unique cardholders with 5 rolling windows x 15 features
+  - How cross-region consistency is maintained within the 500ms window
+  - How GDPR erasure propagates through the feature store
 
-  3. **Database strategy**: How do you handle the shared Oracle database? Strangler fig? Database-per-service? Shared database with schema separation? How do you handle the stored procedures?
+  ### 3. Model Serving
+  - Online scoring architecture: how a transaction goes from ingestion to scored in <50ms
+  - Model format and serving infrastructure (ONNX, TensorFlow Serving, custom, etc.)
+  - A/B testing and shadow scoring for new models
+  - Feature engineering: how raw transaction features are joined with stored features at scoring time
+  - Fallback scoring if the ML model is unavailable
 
-  4. **Risk analysis**: Top 5 risks with likelihood, impact, and specific mitigations. Include at least one risk that argues against the migration.
+  ### 4. Historical Data & Training Pipeline
+  - Storage for 6T records (format, partitioning, compression)
+  - How training data is extracted without impacting the real-time pipeline
+  - How GDPR erasure is handled in historical data (immutable storage challenge)
 
-  5. **What NOT to do**: Explicitly state what you would defer or avoid. Justify each exclusion.
+  ### 5. Data Flow Diagram
+  Provide a text-based data flow diagram showing the complete path of a transaction from ingestion through scoring, storage, and alerting. Include all systems, data stores, and network boundaries.
 
-  6. **Success metrics**: How do you measure whether the migration is succeeding? Define 3-5 metrics with specific targets and measurement frequency.
+  ### 6. Capacity Estimates
+  For each major component, provide:
+  - CPU/memory/storage requirements
+  - Estimated monthly cost (sum must be <= $50K)
+  - Scaling bottleneck and mitigation
 
-  7. **Honest assessment**: What is the probability of completing this in 6 months? What is the most likely failure mode? What would you tell the board?
+  ### 7. Failure Mode Analysis
+  Identify the top 5 failure scenarios and for each:
+  - Trigger condition
+  - Blast radius (what breaks)
+  - Detection mechanism
+  - Recovery procedure
+  - RTO/RPO
 
-  Be specific. Reference the actual team sizes, traffic numbers, and constraints. Generic microservices advice with no connection to these specifics will be considered a failure.
+  ### 8. GDPR Erasure Procedure
+  Step-by-step procedure for erasing a cardholder's data across ALL stores within 72 hours. Address the fundamental tension between immutable event logs and the right to erasure.
+
+  Be specific about technology choices, version numbers where relevant, and configuration details. Generic architectures that ignore the constraints will be considered failures. If any constraint creates a genuine tension with another constraint, call it out explicitly and explain the trade-off you are making.
 temperature: 0.7
-max_output_tokens: 4096
+max_output_tokens: 8192
 evaluation:
   type: "reasoning"
   criteria:
-    - name: "constraint_awareness"
-      description: "Recommendation demonstrably shaped by the specific constraints (6 months, $800K, 200ms SLA, PCI-DSS, 40 engineers). Not generic advice with constraints mentioned as afterthoughts."
-      weight: 0.25
-    - name: "strategy_justification"
-      description: "Migration strategy choice is well-justified with explicit reasoning about why alternatives were rejected for this specific situation"
+    - name: "constraint_satisfaction"
+      description: "Design demonstrably addresses ALL constraints: 100K TPS, 50ms p99, 30-day lookback, GDPR erasure, PCI DSS, multi-region active-active, $50K budget, 7-person team. Does not hand-wave or ignore any constraint."
       weight: 0.20
-    - name: "sequencing_realism"
-      description: "Month-by-month plan is realistic given team sizes and constraints. Does not assume infinite parallelism or zero learning curve."
-      weight: 0.20
-    - name: "database_strategy"
-      description: "Database strategy addresses the hard problems: shared Oracle, stored procedures, data consistency during transition. Does not hand-wave."
+    - name: "technology_justification"
+      description: "Technology choices are justified against alternatives with specific reasons tied to the constraints. Not just listing popular tools."
       weight: 0.15
-    - name: "risk_honesty"
-      description: "Risk analysis is honest and includes genuine risks (not strawmen). Includes at least one argument against the migration."
+    - name: "feature_store_design"
+      description: "Feature store design addresses rolling window computation, memory estimates, cross-region consistency, and erasure propagation with technical specificity."
+      weight: 0.15
+    - name: "capacity_estimates"
+      description: "Capacity estimates are realistic and sum to <= $50K/month. Shows understanding of actual infrastructure costs."
+      weight: 0.15
+    - name: "gdpr_erasure"
+      description: "GDPR erasure procedure is technically feasible and addresses the immutable log tension. Not hand-waved as 'just delete it'."
       weight: 0.10
-    - name: "practical_specificity"
-      description: "Recommendations reference specific teams, traffic numbers, and technical details from the scenario rather than being interchangeable with any migration plan"
+    - name: "failure_analysis"
+      description: "Failure modes are realistic, include blast radius and recovery, and cover the most likely actual failure scenarios for this architecture."
+      weight: 0.10
+    - name: "data_flow_clarity"
+      description: "Data flow diagram is clear, complete, and shows the full transaction lifecycle including region boundaries."
+      weight: 0.05
+    - name: "trade_off_honesty"
+      description: "Acknowledges genuine tensions between constraints (e.g., budget vs. multi-region, latency vs. consistency, immutability vs. erasure) and explains trade-offs rather than pretending they don't exist."
       weight: 0.10

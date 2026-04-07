@@ -1,9 +1,9 @@
 category: tool_use
 tier: hard
-name: "Agentic test debugging loop"
-description: "Tests ability to execute an agentic debugging loop: read files, run tests, interpret results, identify bugs, and propose fixes using tool calls"
+name: "Multi-step CI debugging with realistic mock tools"
+description: "Tests ability to execute an 8-step agentic debugging workflow: read CI logs, identify failing test, read test and source files, identify subtle off-by-one + timezone bug, check git blame for context, propose contextual fix, and verify edge cases"
 prompt: |
-  You are a debugging agent. A test suite is failing and you must diagnose and fix the issue. You have access to the following tools. Demonstrate the exact sequence of tool calls you would make, showing your reasoning at each step.
+  You are a debugging agent. A CI pipeline is failing and you must diagnose and fix the issue. You have access to the following tools. Demonstrate the exact sequence of tool calls you would make, showing your reasoning at each step.
 
   ## Available Tools
 
@@ -18,18 +18,9 @@ prompt: |
           "parameters": {
             "type": "object",
             "properties": {
-              "path": {
-                "type": "string",
-                "description": "Path to the file to read"
-              },
-              "start_line": {
-                "type": "integer",
-                "description": "Start reading from this line number (1-indexed). Omit to start from beginning."
-              },
-              "end_line": {
-                "type": "integer",
-                "description": "Stop reading at this line number (inclusive). Omit to read to end."
-              }
+              "path": {"type": "string", "description": "Path to the file to read"},
+              "start_line": {"type": "integer", "description": "Start line (1-indexed)"},
+              "end_line": {"type": "integer", "description": "End line (inclusive)"}
             },
             "required": ["path"]
           }
@@ -38,57 +29,15 @@ prompt: |
       {
         "type": "function",
         "function": {
-          "name": "list_directory",
-          "description": "List files and directories at a given path",
+          "name": "run_command",
+          "description": "Execute a shell command and return stdout/stderr",
           "parameters": {
             "type": "object",
             "properties": {
-              "path": {
-                "type": "string",
-                "description": "Directory path to list"
-              },
-              "recursive": {
-                "type": "boolean",
-                "description": "Whether to list recursively",
-                "default": false
-              },
-              "pattern": {
-                "type": "string",
-                "description": "Glob pattern to filter results (e.g., '*.py')"
-              }
+              "command": {"type": "string", "description": "The command to execute"},
+              "working_directory": {"type": "string", "description": "Working directory for the command"}
             },
-            "required": ["path"]
-          }
-        }
-      },
-      {
-        "type": "function",
-        "function": {
-          "name": "run_tests",
-          "description": "Run the test suite or specific test files",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "test_path": {
-                "type": "string",
-                "description": "Path to test file or directory. Omit to run all tests."
-              },
-              "test_name": {
-                "type": "string",
-                "description": "Specific test function name to run (e.g., 'test_calculate_discount')"
-              },
-              "verbose": {
-                "type": "boolean",
-                "description": "Enable verbose output with full tracebacks",
-                "default": false
-              },
-              "coverage": {
-                "type": "boolean",
-                "description": "Run with coverage reporting",
-                "default": false
-              }
-            },
-            "required": []
+            "required": ["command"]
           }
         }
       },
@@ -96,28 +45,14 @@ prompt: |
         "type": "function",
         "function": {
           "name": "search_code",
-          "description": "Search for a pattern across the codebase",
+          "description": "Search for a pattern across the codebase using regex",
           "parameters": {
             "type": "object",
             "properties": {
-              "pattern": {
-                "type": "string",
-                "description": "Regex pattern to search for"
-              },
-              "path": {
-                "type": "string",
-                "description": "Directory to search in",
-                "default": "."
-              },
-              "file_pattern": {
-                "type": "string",
-                "description": "Glob pattern for files to search (e.g., '*.py')"
-              },
-              "max_results": {
-                "type": "integer",
-                "description": "Maximum number of matches to return",
-                "default": 20
-              }
+              "pattern": {"type": "string", "description": "Regex pattern to search for"},
+              "path": {"type": "string", "description": "Directory to search in", "default": "."},
+              "file_pattern": {"type": "string", "description": "Glob pattern for file types"},
+              "context_lines": {"type": "integer", "description": "Lines of context around matches", "default": 3}
             },
             "required": ["pattern"]
           }
@@ -126,21 +61,49 @@ prompt: |
       {
         "type": "function",
         "function": {
-          "name": "write_file",
-          "description": "Write or overwrite a file with new contents",
+          "name": "git_log",
+          "description": "View git log with optional file filtering",
           "parameters": {
             "type": "object",
             "properties": {
-              "path": {
-                "type": "string",
-                "description": "Path to the file to write"
-              },
-              "content": {
-                "type": "string",
-                "description": "Complete file content to write"
-              }
+              "file_path": {"type": "string", "description": "Show commits for a specific file"},
+              "n": {"type": "integer", "description": "Number of commits to show", "default": 10},
+              "since": {"type": "string", "description": "Show commits since date (e.g., '2 days ago')"},
+              "format": {"type": "string", "description": "Output format", "default": "medium"}
             },
-            "required": ["path", "content"]
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "git_blame",
+          "description": "Show line-by-line attribution for a file",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "file_path": {"type": "string", "description": "Path to the file"},
+              "start_line": {"type": "integer", "description": "Start line"},
+              "end_line": {"type": "integer", "description": "End line"}
+            },
+            "required": ["file_path"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "git_diff",
+          "description": "Show diff between commits or working tree",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "ref1": {"type": "string", "description": "First ref (commit hash, branch, HEAD~1, etc.)"},
+              "ref2": {"type": "string", "description": "Second ref (defaults to working tree)"},
+              "file_path": {"type": "string", "description": "Limit diff to specific file"}
+            },
+            "required": []
           }
         }
       },
@@ -152,18 +115,9 @@ prompt: |
           "parameters": {
             "type": "object",
             "properties": {
-              "path": {
-                "type": "string",
-                "description": "Path to the file to edit"
-              },
-              "old_text": {
-                "type": "string",
-                "description": "The exact text to find and replace"
-              },
-              "new_text": {
-                "type": "string",
-                "description": "The replacement text"
-              }
+              "path": {"type": "string", "description": "Path to the file to edit"},
+              "old_text": {"type": "string", "description": "The exact text to find and replace"},
+              "new_text": {"type": "string", "description": "The replacement text"}
             },
             "required": ["path", "old_text", "new_text"]
           }
@@ -175,61 +129,79 @@ prompt: |
 
   ## Scenario
 
-  You have been told: "The test suite for the `pricing` module is failing. 3 out of 8 tests are broken. It was working yesterday before someone pushed changes to the discount calculation logic."
+  You receive a Slack notification: "CI is red on main. The `test_billing` suite started failing after yesterday's merge. 2 of 14 tests are broken: `test_prorate_mid_cycle` and `test_invoice_generation_boundary`. Other tests pass fine. This was working before commit abc1234."
 
-  The project structure is:
+  The project is a SaaS billing system. The repo structure is:
+
   ```
-  project/
+  billing-service/
     src/
-      pricing/
+      billing/
         __init__.py
-        calculator.py
-        discounts.py
-        models.py
+        calculator.py      # Core billing calculations
+        invoice.py          # Invoice generation
+        models.py           # Data models
+        time_utils.py       # Date/time helpers
     tests/
-      test_pricing/
+      test_billing/
         test_calculator.py
-        test_discounts.py
-    requirements.txt
+        test_invoice.py
+        conftest.py         # Shared fixtures
+    .github/
+      workflows/
+        ci.yml
   ```
 
   ## Your Task
 
-  Walk through the complete debugging workflow as an agent would execute it. For each iteration of the loop, provide:
+  Execute the COMPLETE debugging workflow. For each step provide:
 
-  1. **Observation**: What you know so far
-  2. **Hypothesis**: What you think might be wrong
-  3. **Action**: The exact tool call (JSON format) you would make
-  4. **Simulated result**: Write a realistic mock result for your tool call
-  5. **Analysis**: What the result tells you
+  1. **Observation**: What you know so far from previous steps
+  2. **Hypothesis**: Your current theory about what is wrong
+  3. **Action**: The exact tool call in JSON format
+  4. **Result**: Write a realistic mock result that the tool would return
 
-  Execute at least 6 tool calls across the following phases:
-  - **Phase 1: Orientation** - Understand the codebase structure and run the failing tests
-  - **Phase 2: Investigation** - Read relevant source files and test files, narrow down the bug
-  - **Phase 3: Diagnosis** - Identify the specific bug(s) causing the 3 test failures
-  - **Phase 4: Fix** - Apply the fix using edit_file
-  - **Phase 5: Verification** - Re-run tests to confirm the fix works
+  You must simulate results that tell this coherent story:
 
-  Your simulated results should tell a coherent story: the discount calculation was recently changed from percentage-based to a tiered system, but the implementation has an off-by-one error in the tier boundaries and doesn't handle the edge case where quantity equals exactly the tier threshold.
+  The failing tests involve prorated billing calculations and invoice date boundaries. The recent commit (abc1234, authored by "dev-sarah", message: "fix: use UTC consistently in billing period calculations") changed `calculator.py` to use `datetime.utcnow()` instead of `datetime.now()` for period boundary calculations. However:
 
-  Show the complete agentic loop with realistic tool calls, realistic outputs, and sound reasoning between each step.
+  **Bug 1 (off-by-one):** The `calculate_prorated_amount()` function computes the number of billable days as `(period_end - usage_start).days`. This is off-by-one because it doesn't count the start day as a billable day. The old code accidentally compensated for this because `datetime.now()` in the test timezone (US/Eastern, UTC-4 or UTC-5) would shift the boundary, but now with UTC, the off-by-one is exposed. The correct formula is `(period_end - usage_start).days + 1` (inclusive of both start and end days) BUT only when `usage_start` is before or equal to the period start -- otherwise it should be `(period_end - usage_start).days` (partial period).
+
+  **Bug 2 (timezone in date comparison):** The `is_within_billing_period()` function in `time_utils.py` compares a timezone-aware `usage_timestamp` with a naive UTC `period_start`/`period_end`. After the UTC migration, `period_start` is now naive UTC while `usage_timestamp` (coming from external webhook data) is timezone-aware (has tzinfo). This causes a `TypeError: can't compare offset-naive and offset-aware datetimes` in some code paths but not all, because some test fixtures use naive datetimes and others use aware datetimes.
+
+  The fix must:
+  - Correct the off-by-one for full-period proration
+  - Make `is_within_billing_period()` handle both naive and aware datetimes by normalizing to UTC
+  - NOT break the original intent of the UTC migration (the UTC change was correct, the implementation was incomplete)
+
+  Execute at least 8 tool calls across these phases:
+  - **Phase 1** (2 calls): Read CI logs and run failing tests to get exact error output
+  - **Phase 2** (2 calls): Read the source files that are failing (calculator.py and time_utils.py)
+  - **Phase 3** (2 calls): Read the test files to understand expected behavior, and git blame/diff to understand what changed
+  - **Phase 4** (1 call): Apply the fix via edit_file
+  - **Phase 5** (1 call): Re-run the specific failing tests to verify
+
+  Show the complete agentic loop with realistic tool calls, realistic outputs (include proper Python tracebacks, plausible code, realistic git output), and sound reasoning between each step. The reasoning should demonstrate that you understand WHY the bugs exist, not just WHERE they are.
 temperature: 0.3
-max_output_tokens: 4096
+max_output_tokens: 8192
 evaluation:
   type: "tool_use"
   criteria:
     - name: "correct_tool_selection"
-      description: "Uses appropriate tools for each phase (list_directory/read_file for orientation, run_tests for testing, search_code for investigation, edit_file for fixing)"
-      weight: 0.20
-    - name: "logical_flow"
-      description: "Each step logically follows from the previous. Does not make leaps without evidence. Hypotheses are updated based on results."
-      weight: 0.25
-    - name: "realistic_simulation"
-      description: "Simulated tool outputs are realistic (proper Python tracebacks, plausible code, coherent bug story)"
-      weight: 0.20
-    - name: "bug_identification"
-      description: "Correctly identifies the off-by-one error and edge case bug through systematic investigation, not guessing"
-      weight: 0.20
-    - name: "fix_correctness"
-      description: "Proposed fix via edit_file correctly addresses the identified bugs. The edit uses proper old_text/new_text targeting."
+      description: "Uses appropriate tools for each phase: run_command for CI/tests, read_file for source investigation, git_blame/git_diff for understanding changes, edit_file for fixing, run_command for verification. Does not use tools unnecessarily or skip logical steps."
       weight: 0.15
+    - name: "logical_investigation_flow"
+      description: "Each step logically follows from the previous. Hypotheses are updated based on results. Does not jump to conclusions without evidence. Shows genuine debugging reasoning (narrowing down, not guessing)."
+      weight: 0.20
+    - name: "realistic_simulation"
+      description: "Simulated tool outputs are realistic: proper Python tracebacks with correct line numbers, plausible billing calculation code, realistic git blame output, coherent test fixtures. The code across all simulated files is internally consistent."
+      weight: 0.15
+    - name: "bug_identification_depth"
+      description: "Correctly identifies BOTH bugs: (1) the off-by-one in day counting that was masked by timezone offset, and (2) the naive vs. aware datetime comparison TypeError. Explains WHY the old code worked (accidental timezone compensation) and why the new code exposed the bug."
+      weight: 0.25
+    - name: "fix_correctness"
+      description: "Proposed fix via edit_file correctly addresses both bugs without breaking the UTC migration intent. Handles the edge case where usage_start equals period_start. Normalizes datetime comparison properly."
+      weight: 0.15
+    - name: "edge_case_awareness"
+      description: "Demonstrates awareness of edge cases: DST transitions, month boundaries, leap years, usage_start == period_start, usage_start == period_end, timezone-aware vs naive inputs."
+      weight: 0.10

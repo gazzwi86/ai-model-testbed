@@ -1,85 +1,208 @@
 category: code_review
 tier: simple
-name: "Buggy script review (5 bugs)"
-description: "Tests ability to identify 5 planted bugs in a short Python script: off-by-one, unclosed file, silent type coercion, missing return, index error"
+name: "Flask API security review (8 vulnerabilities)"
+description: "Tests ability to identify 8 planted security and reliability issues in a ~100-line Flask API: SQL injection, CSRF, debug mode, hardcoded secrets, missing rate limiting, stack trace leaking, path traversal, and insecure deserialization"
 prompt: |
-  Review the following Python script. Identify all bugs, explain each one, and provide corrected code.
+  Review the following Flask API for security vulnerabilities, bugs, and production-readiness issues. This is deployed in production serving real users. Identify all problems, classify their severity, and provide corrected code.
 
   ```python
-  import sys
+  import os
+  import sqlite3
+  import pickle
+  import base64
+  from flask import Flask, request, jsonify, g
+  from functools import wraps
 
-  def read_scores(filepath):
-      """Read scores from a file, one integer per line."""
-      scores = []
-      f = open(filepath, 'r')
-      for line in f:
-          scores.append(line.strip())
-      return scores
+  app = Flask(__name__)
+  app.config['DEBUG'] = True
+  app.config['SECRET_KEY'] = 'super-secret-key-12345'
 
-  def compute_statistics(scores):
-      """Compute mean and highest score."""
-      total = 0
-      for i in range(1, len(scores)):
-          total += scores[i]
-      mean = total / len(scores)
-      highest = max(scores)
-      return mean
+  DATABASE = 'app.db'
+  API_KEY = 'ak_live_7f3b2c1d9e8a4f5b6c7d8e9f0a1b2c3d'
 
-  def get_grade(score):
-      """Return letter grade for a numeric score."""
-      if score >= 90:
-          grade = 'A'
-      elif score >= 80:
-          grade = 'B'
-      elif score >= 70:
-          grade = 'C'
-      elif score >= 60:
-          grade = 'D'
-      else:
-          grade = 'F'
+  def get_db():
+      if 'db' not in g:
+          g.db = sqlite3.connect(DATABASE)
+          g.db.row_factory = sqlite3.Row
+      return g.db
 
-  def main():
-      filepath = sys.argv[1]
-      scores = read_scores(filepath)
-      mean, highest = compute_statistics(scores)
-      print(f"Mean score: {mean:.1f}")
-      print(f"Highest score: {highest}")
-      for score in scores:
-          print(f"  {score}: {get_grade(score)}")
+  @app.teardown_appcontext
+  def close_db(exception):
+      db = g.pop('db', None)
+      if db is not None:
+          db.close()
+
+  def require_auth(f):
+      @wraps(f)
+      def decorated(*args, **kwargs):
+          token = request.headers.get('Authorization')
+          if token != f'Bearer {API_KEY}':
+              return jsonify({'error': 'Unauthorized'}), 401
+          return f(*args, **kwargs)
+      return decorated
+
+  def init_db():
+      db = sqlite3.connect(DATABASE)
+      db.execute('''CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT UNIQUE NOT NULL,
+          email TEXT NOT NULL,
+          role TEXT DEFAULT 'user',
+          profile_data TEXT
+      )''')
+      db.execute('''CREATE TABLE IF NOT EXISTS notes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )''')
+      db.commit()
+      db.close()
+
+  @app.route('/api/users', methods=['GET'])
+  @require_auth
+  def search_users():
+      query = request.args.get('q', '')
+      db = get_db()
+      results = db.execute(
+          f"SELECT id, username, email, role FROM users WHERE username LIKE '%{query}%'"
+      ).fetchall()
+      return jsonify([dict(r) for r in results])
+
+  @app.route('/api/users/<int:user_id>', methods=['GET'])
+  @require_auth
+  def get_user(user_id):
+      db = get_db()
+      user = db.execute(
+          f"SELECT * FROM users WHERE id = {user_id}"
+      ).fetchone()
+      if not user:
+          return jsonify({'error': 'User not found'}), 404
+      return jsonify(dict(user))
+
+  @app.route('/api/users', methods=['POST'])
+  @require_auth
+  def create_user():
+      data = request.get_json()
+      username = data['username']
+      email = data['email']
+      role = data.get('role', 'user')
+      db = get_db()
+      try:
+          db.execute(
+              f"INSERT INTO users (username, email, role) VALUES ('{username}', '{email}', '{role}')"
+          )
+          db.commit()
+          return jsonify({'message': 'User created'}), 201
+      except Exception as e:
+          return jsonify({'error': str(e), 'traceback': __import__('traceback').format_exc()}), 500
+
+  @app.route('/api/users/<int:user_id>/profile', methods=['PUT'])
+  @require_auth
+  def update_profile(user_id):
+      data = request.get_json()
+      profile_bytes = pickle.dumps(data.get('profile', {}))
+      encoded = base64.b64encode(profile_bytes).decode()
+      db = get_db()
+      db.execute(
+          f"UPDATE users SET profile_data = '{encoded}' WHERE id = {user_id}"
+      )
+      db.commit()
+      return jsonify({'message': 'Profile updated'})
+
+  @app.route('/api/users/<int:user_id>/profile', methods=['GET'])
+  @require_auth
+  def get_profile(user_id):
+      db = get_db()
+      row = db.execute(f"SELECT profile_data FROM users WHERE id = {user_id}").fetchone()
+      if row and row['profile_data']:
+          profile = pickle.loads(base64.b64decode(row['profile_data']))
+          return jsonify({'profile': profile})
+      return jsonify({'profile': {}})
+
+  @app.route('/api/notes', methods=['GET'])
+  @require_auth
+  def get_notes():
+      user_id = request.args.get('user_id')
+      db = get_db()
+      notes = db.execute(
+          f"SELECT * FROM notes WHERE user_id = {user_id}"
+      ).fetchall()
+      return jsonify([dict(n) for n in notes])
+
+  @app.route('/api/files/<path:filename>', methods=['GET'])
+  @require_auth
+  def download_file(filename):
+      filepath = os.path.join('uploads', filename)
+      with open(filepath, 'rb') as f:
+          content = f.read()
+      return content, 200, {'Content-Type': 'application/octet-stream'}
+
+  @app.route('/api/health', methods=['GET'])
+  def health_check():
+      db = get_db()
+      try:
+          db.execute('SELECT 1')
+          return jsonify({
+              'status': 'healthy',
+              'database': DATABASE,
+              'debug_mode': app.config['DEBUG'],
+              'api_key': API_KEY[:10] + '...',
+              'python_version': __import__('sys').version,
+              'env': dict(os.environ)
+          })
+      except Exception as e:
+          return jsonify({'status': 'unhealthy', 'error': str(e)}), 500
 
   if __name__ == '__main__':
-      main()
+      init_db()
+      app.run(host='0.0.0.0', port=5000)
   ```
 
-  For each bug found, provide:
+  For each issue found, provide:
   1. The line number(s) affected
-  2. The type of bug (e.g., logic error, resource leak, type error)
-  3. A clear explanation of why it is a bug
-  4. The corrected code for that section
+  2. Severity: CRITICAL, HIGH, MEDIUM, LOW
+  3. Category: security, reliability, performance, or configuration
+  4. The specific vulnerability type (e.g., SQL injection, CWE number if known)
+  5. A clear explanation of how it could be exploited
+  6. The corrected code for that section
 temperature: 0.3
-max_output_tokens: 2048
+max_output_tokens: 4096
 evaluation:
   type: "bug_detection"
   checklist:
-    - id: "bug_1_off_by_one"
-      description: "Off-by-one error in compute_statistics: range(1, len(scores)) skips the first element (index 0). Should be range(len(scores)) or iterate directly."
-      severity: "logic_error"
-      line: 15
-    - id: "bug_2_unclosed_file"
-      description: "File handle 'f' in read_scores is never closed. Should use a 'with' statement or explicitly call f.close()."
-      severity: "resource_leak"
-      line: 7
-    - id: "bug_3_type_coercion"
-      description: "Scores are appended as strings (line.strip() returns str). They are never converted to int/float, causing silent type coercion bugs in arithmetic and comparisons."
-      severity: "type_error"
-      line: 9
-    - id: "bug_4_missing_return"
-      description: "get_grade() does not return the grade variable. The function implicitly returns None."
-      severity: "logic_error"
-      line: 30
-    - id: "bug_5_unpack_error"
-      description: "compute_statistics returns only 'mean' (a single value), but main() tries to unpack it as 'mean, highest = compute_statistics(scores)'. Also, 'highest' is computed but never returned."
-      severity: "runtime_error"
-      line: 18
-  pass_threshold: 4
+    - id: "vuln_1_sql_injection"
+      description: "Multiple SQL injection vulnerabilities via f-string formatting in search_users, get_user, create_user, update_profile, get_profile, and get_notes. All user-supplied parameters are interpolated directly into SQL queries without parameterization."
+      severity: "critical"
+      category: "security"
+    - id: "vuln_2_debug_mode"
+      description: "DEBUG mode is enabled in production (app.config['DEBUG'] = True). This exposes the Werkzeug debugger which allows arbitrary code execution via the debug console."
+      severity: "critical"
+      category: "configuration"
+    - id: "vuln_3_hardcoded_secrets"
+      description: "SECRET_KEY and API_KEY are hardcoded in source code. These should be loaded from environment variables or a secrets manager."
+      severity: "critical"
+      category: "security"
+    - id: "vuln_4_stack_trace_leak"
+      description: "create_user returns full traceback in error response (traceback.format_exc()). This leaks internal code paths, file structure, and potentially sensitive data to attackers."
+      severity: "high"
+      category: "security"
+    - id: "vuln_5_pickle_deserialization"
+      description: "get_profile uses pickle.loads on data stored in the database. If an attacker can inject data via SQL injection or direct DB access, they can achieve remote code execution through crafted pickle payloads."
+      severity: "critical"
+      category: "security"
+    - id: "vuln_6_path_traversal"
+      description: "download_file joins user-supplied filename with 'uploads' directory without sanitization. An attacker can use '../' sequences to read arbitrary files from the filesystem (e.g., /etc/passwd, source code, config files)."
+      severity: "critical"
+      category: "security"
+    - id: "vuln_7_info_leak_health"
+      description: "health_check endpoint exposes environment variables (os.environ), partial API key, database path, debug mode status, and Python version. It also has no authentication. This gives attackers reconnaissance information."
+      severity: "high"
+      category: "security"
+    - id: "vuln_8_no_rate_limiting"
+      description: "No rate limiting on any endpoint, including authentication. Allows brute-force attacks against the API key and abuse of resource-intensive endpoints like search."
+      severity: "medium"
+      category: "security"
+  pass_threshold: 6
   max_false_positives: 3

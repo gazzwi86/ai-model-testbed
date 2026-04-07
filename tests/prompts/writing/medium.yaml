@@ -1,52 +1,466 @@
 category: writing
 tier: medium
-name: "Blog post on AI cost governance"
-description: "Tests ability to write a structured, engaging 1,000-word blog post aimed at platform engineering leaders on a technical-business topic"
+name: "Payment SDK API documentation"
+description: "Tests ability to generate comprehensive API documentation from source code: endpoint reference, auth guide, error handling, multi-language examples, rate limiting docs, and webhook integration guide"
 prompt: |
-  Write a 1,000-word blog post titled "Why Platform Engineering Teams Should Care About AI Cost Governance."
+  Generate comprehensive API documentation for the following payment processing SDK. The documentation is for third-party developers integrating this SDK into their applications. It should be publication-ready for a developer portal.
 
-  Target audience: Senior platform engineers and engineering managers at mid-to-large companies (500-5000 employees) who are deploying AI/ML workloads on their internal platforms.
+  ## Source Code
 
-  The blog post should cover:
+  ```python
+  """PayFlow SDK - Payment Processing Client Library"""
 
-  1. **The problem:** AI workloads (training, fine-tuning, inference) are becoming a significant and often untracked portion of cloud spend. Unlike traditional compute, AI costs are spiky, hard to predict, and often initiated by data science teams outside normal infrastructure governance. Use a specific (but realistic) example: a team spinning up GPU instances for fine-tuning that cost $14,000 over a weekend because nobody set up auto-shutdown.
+  from dataclasses import dataclass, field
+  from enum import Enum
+  from typing import Optional, Dict, List, Any, Iterator
+  from datetime import datetime, timedelta
+  import hashlib
+  import hmac
+  import json
+  import time
+  import logging
 
-  2. **Why platform teams specifically:** Platform teams sit at the intersection of infrastructure, developer experience, and cost management. They already manage resource quotas, CI/CD pipelines, and environment provisioning. AI cost governance is a natural extension, not a new responsibility.
+  logger = logging.getLogger("payflow")
 
-  3. **Three practical recommendations:**
-     - Build AI cost visibility into existing dashboards (tag GPU workloads, separate inference vs training costs, show cost-per-model-version)
-     - Implement GPU-aware resource quotas and automatic shutdown policies (with examples of Kubernetes resource quotas or cloud provider budget alerts)
-     - Create a lightweight internal "AI workload request" process that doesn't slow teams down but ensures costs are forecasted and approved
+  class Currency(Enum):
+      USD = "usd"
+      EUR = "eur"
+      GBP = "gbp"
+      JPY = "jpy"
+      CAD = "cad"
+      AUD = "aud"
 
-  4. **The counterargument and response:** Address the concern that adding governance slows down innovation. Argue that guardrails enable faster iteration by preventing the cost blowups that trigger executive clampdowns and hiring freezes.
+  class PaymentStatus(Enum):
+      PENDING = "pending"
+      AUTHORIZED = "authorized"
+      CAPTURED = "captured"
+      REFUNDED = "refunded"
+      PARTIALLY_REFUNDED = "partially_refunded"
+      FAILED = "failed"
+      CANCELLED = "cancelled"
+      DISPUTED = "disputed"
 
-  5. **Closing:** Forward-looking statement about AI costs as a percentage of total cloud spend and why getting governance right now prevents painful retrofitting later.
+  class WebhookEvent(Enum):
+      PAYMENT_CREATED = "payment.created"
+      PAYMENT_AUTHORIZED = "payment.authorized"
+      PAYMENT_CAPTURED = "payment.captured"
+      PAYMENT_FAILED = "payment.failed"
+      PAYMENT_REFUNDED = "payment.refunded"
+      DISPUTE_CREATED = "dispute.created"
+      DISPUTE_RESOLVED = "dispute.resolved"
+      PAYOUT_COMPLETED = "payout.completed"
 
-  Style guidelines:
-  - Write in a conversational but authoritative tone (think: thoughtful senior engineer writing on their company blog)
-  - Use short paragraphs (2-4 sentences max)
-  - Include one concrete example or anecdote per major section
-  - Avoid buzzwords and marketing language
-  - Do not use the phrase "in today's rapidly evolving landscape" or any similar cliche
-  - No bullet points in the body text; use flowing prose with clear section transitions
-  - End with a practical call-to-action
+  @dataclass
+  class Address:
+      line1: str
+      city: str
+      country: str  # ISO 3166-1 alpha-2
+      line2: str = ""
+      state: str = ""
+      postal_code: str = ""
+
+  @dataclass
+  class CardDetails:
+      number: str          # Will be tokenized, never stored
+      exp_month: int       # 1-12
+      exp_year: int        # 4-digit year
+      cvv: str             # 3-4 digits, never stored
+      cardholder_name: str = ""
+      billing_address: Optional[Address] = None
+
+  @dataclass
+  class PaymentMethod:
+      type: str            # "card", "bank_transfer", "wallet"
+      card: Optional[CardDetails] = None
+      token: Optional[str] = None  # Reusable payment token
+      wallet_type: Optional[str] = None  # "apple_pay", "google_pay"
+
+  @dataclass
+  class Payment:
+      id: str
+      amount: int                 # Amount in smallest currency unit (cents)
+      currency: Currency
+      status: PaymentStatus
+      payment_method_type: str
+      description: str
+      customer_id: Optional[str]
+      metadata: Dict[str, str]
+      created_at: datetime
+      updated_at: datetime
+      captured_at: Optional[datetime] = None
+      refunded_amount: int = 0
+      failure_code: Optional[str] = None
+      failure_message: Optional[str] = None
+      receipt_url: Optional[str] = None
+      card_last_four: Optional[str] = None
+      card_brand: Optional[str] = None
+
+  @dataclass
+  class Refund:
+      id: str
+      payment_id: str
+      amount: int
+      currency: Currency
+      status: str
+      reason: str
+      created_at: datetime
+
+  @dataclass
+  class Customer:
+      id: str
+      email: str
+      name: str
+      phone: Optional[str] = None
+      metadata: Dict[str, str] = field(default_factory=dict)
+      default_payment_method: Optional[str] = None
+      created_at: Optional[datetime] = None
+
+  @dataclass
+  class Dispute:
+      id: str
+      payment_id: str
+      amount: int
+      currency: Currency
+      reason: str
+      status: str  # "open", "under_review", "won", "lost"
+      evidence_due_by: datetime
+      created_at: datetime
+
+  class PayFlowError(Exception):
+      def __init__(self, message: str, code: str, status_code: int,
+                   request_id: Optional[str] = None):
+          super().__init__(message)
+          self.code = code
+          self.status_code = status_code
+          self.request_id = request_id
+
+  class AuthenticationError(PayFlowError):
+      """Invalid or missing API key."""
+      pass
+
+  class CardDeclinedError(PayFlowError):
+      """Card was declined by the issuing bank."""
+      def __init__(self, message: str, decline_code: str, **kwargs):
+          super().__init__(message, code="card_declined", **kwargs)
+          self.decline_code = decline_code
+
+  class RateLimitError(PayFlowError):
+      """Too many requests. Check Retry-After header."""
+      def __init__(self, message: str, retry_after: int, **kwargs):
+          super().__init__(message, code="rate_limited", **kwargs)
+          self.retry_after = retry_after
+
+  class IdempotencyError(PayFlowError):
+      """Idempotency key was already used with different parameters."""
+      pass
+
+  class InvalidRequestError(PayFlowError):
+      """Request parameters failed validation."""
+      def __init__(self, message: str, param: str, **kwargs):
+          super().__init__(message, code="invalid_request", **kwargs)
+          self.param = param
+
+  class PayFlowClient:
+      """Main client for the PayFlow payment processing API.
+
+      Rate Limits:
+          - Live mode: 100 requests/second, 1000 requests/minute
+          - Test mode: 25 requests/second, 250 requests/minute
+          - Batch endpoints: 10 requests/second
+
+      Authentication:
+          Uses API key authentication via Bearer token.
+          Test keys start with 'pk_test_' and 'sk_test_'.
+          Live keys start with 'pk_live_' and 'sk_live_'.
+          Secret keys (sk_) should only be used server-side.
+          Publishable keys (pk_) can be used client-side for tokenization.
+      """
+
+      BASE_URL = "https://api.payflow.com/v1"
+      WEBHOOK_TOLERANCE = 300  # 5 minutes
+
+      def __init__(self, api_key: str, *, base_url: str = None,
+                   timeout: float = 30.0, max_retries: int = 2):
+          self.api_key = api_key
+          self.base_url = base_url or self.BASE_URL
+          self.timeout = timeout
+          self.max_retries = max_retries
+          self._is_test = api_key.startswith(("pk_test_", "sk_test_"))
+
+      # --- Payments ---
+
+      def create_payment(self, amount: int, currency: Currency,
+                         payment_method: PaymentMethod, *,
+                         customer_id: str = None, description: str = "",
+                         metadata: Dict[str, str] = None,
+                         capture: bool = True,
+                         idempotency_key: str = None) -> Payment:
+          """Create and optionally capture a payment.
+
+          Args:
+              amount: Amount in smallest currency unit (e.g., 1000 = $10.00).
+                      Minimum: 50 (USD/EUR/GBP), 1 (JPY). Maximum: 99999999.
+              currency: Three-letter currency code.
+              payment_method: Card details or payment token.
+              customer_id: Associate payment with a stored customer.
+              description: Statement descriptor (max 22 chars, alphanumeric).
+              metadata: Up to 20 key-value pairs (key max 40 chars, value max 500 chars).
+              capture: If False, only authorize (must capture within 7 days).
+              idempotency_key: Unique key for exactly-once processing (max 64 chars).
+                               Responses cached for 24 hours.
+
+          Returns:
+              Payment object with status and transaction details.
+
+          Raises:
+              CardDeclinedError: Card was declined (check decline_code for reason).
+              InvalidRequestError: Invalid parameters.
+              AuthenticationError: Invalid API key.
+              RateLimitError: Rate limit exceeded (check retry_after).
+          """
+          ...
+
+      def get_payment(self, payment_id: str) -> Payment:
+          """Retrieve a payment by ID.
+
+          Args:
+              payment_id: The payment identifier (starts with 'pay_').
+
+          Returns:
+              Payment object.
+
+          Raises:
+              InvalidRequestError: Payment not found.
+          """
+          ...
+
+      def capture_payment(self, payment_id: str, *,
+                          amount: int = None) -> Payment:
+          """Capture a previously authorized payment.
+
+          Args:
+              payment_id: ID of the authorized payment.
+              amount: Amount to capture (if less than authorized, partial capture).
+                      Defaults to full authorized amount.
+
+          Returns:
+              Updated Payment object.
+
+          Raises:
+              InvalidRequestError: Payment not in 'authorized' state or amount
+                                   exceeds authorized amount.
+          """
+          ...
+
+      def cancel_payment(self, payment_id: str) -> Payment:
+          """Cancel an authorized (uncaptured) payment.
+
+          Args:
+              payment_id: ID of the authorized payment to cancel.
+
+          Returns:
+              Updated Payment with status 'cancelled'.
+
+          Raises:
+              InvalidRequestError: Payment not in 'authorized' state.
+          """
+          ...
+
+      def list_payments(self, *, customer_id: str = None,
+                        status: PaymentStatus = None,
+                        created_after: datetime = None,
+                        created_before: datetime = None,
+                        limit: int = 20,
+                        starting_after: str = None) -> Iterator[Payment]:
+          """List payments with filtering and cursor-based pagination.
+
+          Args:
+              customer_id: Filter by customer.
+              status: Filter by payment status.
+              created_after: Filter by creation date (inclusive).
+              created_before: Filter by creation date (exclusive).
+              limit: Results per page (1-100, default 20).
+              starting_after: Cursor for pagination (payment ID).
+
+          Yields:
+              Payment objects matching the filters.
+          """
+          ...
+
+      # --- Refunds ---
+
+      def create_refund(self, payment_id: str, *,
+                        amount: int = None,
+                        reason: str = "requested_by_customer",
+                        idempotency_key: str = None) -> Refund:
+          """Refund a captured payment (full or partial).
+
+          Args:
+              payment_id: ID of the captured payment.
+              amount: Amount to refund in smallest unit. Defaults to full amount.
+                      Multiple partial refunds allowed up to original amount.
+              reason: One of 'requested_by_customer', 'duplicate', 'fraudulent'.
+              idempotency_key: For exactly-once refund processing.
+
+          Returns:
+              Refund object.
+
+          Raises:
+              InvalidRequestError: Payment not captured, or refund exceeds remaining amount.
+          """
+          ...
+
+      # --- Customers ---
+
+      def create_customer(self, email: str, name: str, *,
+                          phone: str = None,
+                          metadata: Dict[str, str] = None,
+                          payment_method: PaymentMethod = None) -> Customer:
+          """Create a customer record with optional payment method.
+
+          Args:
+              email: Customer email (used for receipts).
+              name: Customer full name.
+              phone: Phone number in E.164 format.
+              metadata: Custom key-value pairs.
+              payment_method: Tokenize and store for future payments.
+
+          Returns:
+              Customer object with generated ID.
+          """
+          ...
+
+      def get_customer(self, customer_id: str) -> Customer:
+          ...
+
+      def update_customer(self, customer_id: str, **kwargs) -> Customer:
+          ...
+
+      def delete_customer(self, customer_id: str) -> None:
+          """Delete a customer and all stored payment methods.
+
+          This is irreversible. Existing payments are not affected.
+          """
+          ...
+
+      # --- Disputes ---
+
+      def get_dispute(self, dispute_id: str) -> Dispute:
+          ...
+
+      def submit_dispute_evidence(self, dispute_id: str, *,
+                                  evidence_text: str = None,
+                                  receipt_url: str = None,
+                                  shipping_tracking: str = None) -> Dispute:
+          """Submit evidence to contest a dispute.
+
+          Must be submitted before evidence_due_by deadline.
+          """
+          ...
+
+      # --- Webhooks ---
+
+      @staticmethod
+      def verify_webhook_signature(payload: bytes, signature: str,
+                                   secret: str, tolerance: int = 300) -> bool:
+          """Verify a webhook signature.
+
+          Args:
+              payload: Raw request body bytes.
+              signature: Value of the 'PayFlow-Signature' header.
+                         Format: 't=<timestamp>,v1=<hex_signature>'
+              secret: Your webhook signing secret (starts with 'whsec_').
+              tolerance: Maximum age in seconds (default 300).
+
+          Returns:
+              True if signature is valid and within tolerance.
+
+          Raises:
+              ValueError: Malformed signature header.
+          """
+          parts = dict(p.split("=", 1) for p in signature.split(","))
+          timestamp = int(parts["t"])
+          expected = hmac.new(
+              secret.encode(), f"{timestamp}.".encode() + payload,
+              hashlib.sha256
+          ).hexdigest()
+          if not hmac.compare_digest(expected, parts["v1"]):
+              return False
+          if abs(time.time() - timestamp) > tolerance:
+              return False
+          return True
+
+      def create_webhook_endpoint(self, url: str,
+                                  events: List[WebhookEvent]) -> dict:
+          """Register a webhook endpoint.
+
+          Args:
+              url: HTTPS URL to receive webhook POST requests.
+              events: List of event types to subscribe to.
+
+          Returns:
+              Dict with 'id', 'url', 'secret', 'events', 'status'.
+          """
+          ...
+  ```
+
+  ## Documentation Requirements
+
+  Produce the following sections:
+
+  ### 1. Quick Start Guide
+  Getting started in under 5 minutes. Include installation, API key setup, and a first payment example.
+
+  ### 2. Authentication Guide
+  Explain test vs. live keys, publishable vs. secret keys, how to authenticate requests, and key security best practices.
+
+  ### 3. Endpoint Reference
+  For each method in the client, document:
+  - HTTP method and path (infer from method name and parameters)
+  - All parameters with types, constraints, and defaults
+  - Response format
+  - Error codes specific to that endpoint
+  - A concise code example
+
+  ### 4. Error Handling Guide
+  Document all error types, their HTTP status codes, common causes, and recommended handling strategies. Include a complete error handling code example.
+
+  ### 5. Code Examples in 3 Languages
+  Provide working code examples in Python, JavaScript (Node.js), and Ruby for:
+  - Creating a payment
+  - Handling errors
+  - Processing a webhook
+
+  ### 6. Rate Limiting Documentation
+  Explain rate limits, how to detect them, recommended retry strategies, and best practices for staying within limits.
+
+  ### 7. Webhook Integration Guide
+  Explain webhook setup, signature verification, event types, retry behavior, best practices for webhook handlers (idempotency, ordering, timeouts), and a complete webhook handler example.
+
+  ### 8. Idempotency Guide
+  Explain what idempotency keys are, when to use them, how they work, and common pitfalls.
+
+  Format the documentation in clean Markdown with proper headings, code blocks with language tags, and tables where appropriate. Write for developers who are competent but unfamiliar with this specific API.
 temperature: 0.7
-max_output_tokens: 2048
+max_output_tokens: 8192
 evaluation:
   type: "writing"
   criteria:
-    - name: "word_count"
-      description: "Approximately 1,000 words (900-1,100 acceptable range)"
+    - name: "completeness"
+      description: "All 8 required sections are present with sufficient depth. No section is just a placeholder."
+      weight: 0.20
+    - name: "endpoint_accuracy"
+      description: "Endpoint reference correctly infers HTTP methods, paths, parameters, and constraints from the source code. Does not fabricate features not in the code."
+      weight: 0.20
+    - name: "code_examples"
+      description: "Code examples in all 3 languages are syntactically correct, idiomatic for each language, and demonstrate realistic usage patterns (not trivial hello-world)."
+      weight: 0.20
+    - name: "error_handling"
+      description: "Error handling guide is thorough: covers all exception types, maps to HTTP status codes, shows catch/handle patterns, and recommends retry strategies."
+      weight: 0.15
+    - name: "webhook_guide"
+      description: "Webhook guide covers signature verification, event types, idempotent handling, retry behavior, and ordering considerations."
+      weight: 0.15
+    - name: "developer_experience"
+      description: "Documentation reads naturally, uses consistent formatting, includes helpful tables, and anticipates common developer questions."
       weight: 0.10
-    - name: "content_coverage"
-      description: "Covers all 5 required sections with sufficient depth: problem statement with example, why platform teams, 3 practical recommendations, counterargument, and forward-looking close"
-      weight: 0.25
-    - name: "concrete_examples"
-      description: "Includes specific, realistic examples and numbers (not vague generalities)"
-      weight: 0.20
-    - name: "tone_and_style"
-      description: "Conversational but authoritative, no buzzwords or cliches, short paragraphs, no bullet points"
-      weight: 0.25
-    - name: "actionability"
-      description: "Recommendations are practical and specific enough to act on, not generic advice"
-      weight: 0.20
