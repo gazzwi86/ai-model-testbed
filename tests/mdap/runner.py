@@ -160,8 +160,15 @@ async def run_mdap_cross_model(
     config: Config,
     integration_test_file: str | None = None,
     pre_decomposed: list[SubTask] | None = None,
+    model_subset: list[str] | None = None,
+    ensemble_name: str | None = None,
 ) -> MDAPResult:
-    """Run full MDAP pipeline with cross-model ensemble voting."""
+    """Run full MDAP pipeline with cross-model ensemble voting.
+
+    Args:
+        model_subset: List of model IDs to include. If None, uses all local models.
+        ensemble_name: Label for this ensemble combo (e.g. "fast_trio").
+    """
     cost_tracker = CostTracker(config)
 
     # Step 1: Decompose
@@ -177,7 +184,13 @@ async def run_mdap_cross_model(
 
     layers = Decomposer.topological_order(subtasks)
 
-    # Step 2-4: Execute across all models, filter, vote
+    # Resolve model subset
+    if model_subset:
+        models = [m for m in config.local_models if m.id in model_subset]
+    else:
+        models = config.local_models
+    combo_label = ensemble_name or "all_models"
+
     ollama = OllamaClient(config.ollama_base_url)
     runner = MicroagentRunner(ollama)
 
@@ -186,15 +199,15 @@ async def run_mdap_cross_model(
 
     for layer in layers:
         for subtask in layer:
-            logger.info("Subtask %s: running cross-model ensemble", subtask.id)
+            logger.info("Subtask %s: running ensemble [%s]", subtask.id, combo_label)
 
             results = await runner.run_cross_model(
-                subtask, config.local_models, accepted_outputs
+                subtask, models, accepted_outputs
             )
 
             cost_tracker.record_subtask(
                 subtask_id=subtask.id,
-                model_id="cross_model",
+                model_id=f"ensemble_{combo_label}",
                 inference_count=len(results),
                 total_duration_ms=sum(r.duration_ms for r in results),
                 total_prompt_tokens=sum(r.prompt_tokens for r in results),
@@ -235,9 +248,9 @@ async def run_mdap_cross_model(
 
     return MDAPResult(
         task_name=task_name,
-        approach="cross_model",
-        model_id=None,
-        k=len(config.local_models),
+        approach=f"cross_model_{combo_label}",
+        model_id=",".join(m.id for m in models),
+        k=len(models),
         task_type=task_type,
         decomposition_subtask_count=len(subtasks),
         per_subtask_results=per_subtask,
@@ -296,14 +309,39 @@ async def run_mdap_benchmark(
             results.append(result)
             logger.info("Saved: %s", path.name)
 
-    # Cross-model ensemble
-    logger.info("=== MDAP cross-model ensemble ===")
-    result = await run_mdap_cross_model(
-        task_description, task_name, task_type,
-        config, integration_test,
-    )
-    path = save_mdap_result(result)
-    results.append(result)
-    logger.info("Saved: %s", path.name)
+    # Cross-model ensemble combos
+    ensemble_combos = {
+        "all_models": None,  # None = use all
+        "fast_trio": [
+            "gemma4:e4b", "qwen3.5:9b", "deepseek-coder:6.7b",
+        ],
+        "mid_tier": [
+            "qwen3.5:9b", "deepseek-r1:14b", "mistral-small3.2",
+        ],
+        "heavy_hitters": [
+            "gemma4:26b", "gemma4:31b", "qwen3.5:27b",
+        ],
+        "best_of_breed": [
+            "gemma4:26b", "qwen3.5:9b", "deepseek-r1:14b",
+        ],
+        "code_specialists": [
+            "deepseek-coder:6.7b", "deepseek-r1:14b", "gemma4:26b",
+        ],
+    }
+
+    for combo_name, model_ids in ensemble_combos.items():
+        logger.info("=== MDAP ensemble: %s ===", combo_name)
+        try:
+            result = await run_mdap_cross_model(
+                task_description, task_name, task_type,
+                config, integration_test,
+                model_subset=model_ids,
+                ensemble_name=combo_name,
+            )
+            path = save_mdap_result(result)
+            results.append(result)
+            logger.info("Saved: %s", path.name)
+        except Exception as e:
+            logger.error("Ensemble %s failed: %s", combo_name, e)
 
     return results
