@@ -86,6 +86,24 @@ def score_result(result: dict) -> dict:
         logger.error("Scoring failed for %s/%s: %s", category, result.get("test_name"), e)
         scores = {dim: None for dim in dimensions}
 
+    # Fill placeholder scores (None values) with LLM judge for categories
+    # that have automated + judge hybrid scoring
+    if category in ("code_review", "summarisation") and scores:
+        none_axes = [k for k, v in scores.items() if v is None and k != "justifications"]
+        if none_axes:
+            try:
+                from tests.evaluators.llm_judge import evaluate as judge_evaluate
+                judge_scores = judge_evaluate(
+                    result.get("response_text", ""),
+                    category,
+                    axes_override=none_axes,
+                )
+                for axis in none_axes:
+                    if axis in judge_scores and judge_scores[axis] is not None:
+                        scores[axis] = judge_scores[axis]
+            except Exception as e:
+                logger.warning("LLM judge failed for %s/%s: %s", category, result.get("test_name"), e)
+
     result["scores"] = scores
     return result
 
