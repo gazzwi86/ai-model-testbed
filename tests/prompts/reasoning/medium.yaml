@@ -1,0 +1,52 @@
+category: reasoning
+tier: medium
+name: "IoT architecture comparison"
+description: "Tests ability to compare event-driven vs request-response architectures for a specific high-throughput IoT scenario with concrete trade-off analysis"
+prompt: |
+  A logistics company operates 50,000 GPS tracking devices on delivery vehicles. Each device sends a location update every 10 seconds (5,000 messages/second sustained, with 3x spikes during morning dispatch at 15,000 msg/sec). Each message is approximately 200 bytes (device_id, lat, lng, speed, heading, timestamp, battery_level).
+
+  The system must:
+  - Ingest all location updates with no data loss
+  - Provide real-time fleet map (< 5 second delay from device to dashboard)
+  - Support geofence alerts (notify when vehicle enters/exits defined zones) within 2 seconds
+  - Store 90 days of historical location data for route analysis
+  - Handle device reconnection gracefully (devices go through tunnels, rural dead zones)
+  - Scale to 200,000 devices within 18 months
+
+  Compare two architectural approaches for this system:
+
+  **Approach A: Request-Response (REST/HTTP)**
+  Each device POSTs location updates to an HTTP API. The API processes, stores, and triggers alerts synchronously.
+
+  **Approach B: Event-Driven (MQTT + Event Stream)**
+  Devices publish to an MQTT broker. Events flow through a stream processor (e.g., Kafka/Flink) for geofencing, then to storage and dashboard consumers.
+
+  For each approach, analyse:
+  1. **Throughput handling**: Can it sustain 5K msg/sec baseline and 15K msg/sec spikes? What breaks first?
+  2. **Latency**: Can it meet the 5-second dashboard and 2-second geofence SLAs?
+  3. **Reliability**: How does it handle device reconnection, message ordering, and exactly-once processing?
+  4. **Scalability**: Path from 50K to 200K devices. Linear cost scaling or architectural changes needed?
+  5. **Operational complexity**: Team skill requirements, monitoring, debugging, deployment
+  6. **Cost**: Rough infrastructure cost comparison at 50K and 200K device scale
+
+  Conclude with a clear recommendation and identify any hybrid elements worth considering.
+temperature: 0.7
+max_output_tokens: 2048
+evaluation:
+  type: "reasoning"
+  criteria:
+    - name: "technical_accuracy"
+      description: "Correctly identifies strengths and weaknesses of each approach for this specific scenario (not generic pros/cons)"
+      weight: 0.25
+    - name: "scenario_specificity"
+      description: "Analysis uses the specific numbers provided (5K msg/sec, 200-byte payloads, 50K devices) to reason about feasibility, not just generic claims"
+      weight: 0.25
+    - name: "completeness"
+      description: "Addresses all 6 analysis dimensions with substance, not just surface-level mentions"
+      weight: 0.20
+    - name: "recommendation_quality"
+      description: "Clear recommendation with sound justification. Acknowledges trade-offs rather than presenting one option as universally superior."
+      weight: 0.20
+    - name: "practical_insight"
+      description: "Includes practical considerations a real architect would think about (connection pooling, keep-alive, MQTT QoS levels, partition strategies, etc.)"
+      weight: 0.10

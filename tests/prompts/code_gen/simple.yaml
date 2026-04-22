@@ -1,0 +1,106 @@
+category: code_gen
+tier: simple
+name: "REST API client with retry and rate limiting"
+description: "Tests ability to build a production-quality REST API client integrating retry logic, rate limiting, pagination, structured error types, dataclasses, and type hints"
+prompt: |
+  Implement a Python module (`api_client.py`) containing a production-quality REST API client. Use only the standard library plus the `requests` library.
+
+  ## 1. Exception Hierarchy
+
+  Create a structured exception hierarchy rooted at `APIError(Exception)`:
+  - `APIError`: Base exception with `message` (str), `status_code` (int | None), `response_body` (str | None)
+  - `RateLimitError(APIError)`: Raised on 429 responses. Additional field: `retry_after` (float) parsed from `Retry-After` header.
+  - `AuthenticationError(APIError)`: Raised on 401/403 responses.
+  - `ServerError(APIError)`: Raised on 5xx responses.
+  - `ResourceNotFoundError(APIError)`: Raised on 404 responses.
+  - `ValidationError(APIError)`: Raised on 422 responses. Additional field: `errors` (list[dict]) parsed from response JSON `{"errors": [...]}`.
+  - `NetworkError(APIError)`: Wraps `requests.ConnectionError` and `requests.Timeout`. Additional field: `original_exception` (Exception).
+
+  ## 2. Configuration dataclass
+
+  ```python
+  @dataclass(frozen=True)
+  class APIClientConfig:
+      base_url: str
+      api_key: str
+      timeout: float = 30.0
+      max_retries: int = 3
+      backoff_base: float = 1.0
+      backoff_max: float = 60.0
+      rate_limit_rpm: int = 60           # requests per minute
+      rate_limit_burst: int = 10         # max burst
+      default_page_size: int = 100
+  ```
+
+  ## 3. RateLimiter class (Token Bucket algorithm)
+
+  - `__init__(self, rpm: int, burst: int)` - Initialize with requests per minute and burst capacity.
+  - `acquire(self) -> float` - Blocks until a token is available. Returns the wait time in seconds. Uses `threading.Lock` for thread safety.
+  - `_refill(self)` - Refill tokens based on elapsed time since last refill.
+
+  ## 4. APIClient class
+
+  Constructor takes `APIClientConfig`.
+
+  ### Core request method
+  `def request(self, method: str, path: str, *, params: dict | None = None, json_body: dict | None = None, headers: dict | None = None) -> dict`
+
+  This method must:
+  - Prepend `base_url` to `path` (handle trailing/leading slashes correctly)
+  - Set `Authorization: Bearer {api_key}` header
+  - Set `Content-Type: application/json` and `Accept: application/json` headers
+  - Acquire a rate limit token before sending
+  - Implement retry with exponential backoff + jitter for:
+    - `RateLimitError` (respect `retry_after` from the error)
+    - `ServerError` (5xx responses)
+    - `NetworkError` (connection/timeout errors)
+  - Do NOT retry `AuthenticationError`, `ResourceNotFoundError`, `ValidationError`
+  - Log each attempt using `logging.getLogger("api_client")` with structured fields: `method`, `path`, `attempt`, `status_code`, `duration_ms`
+  - Raise the appropriate exception from the hierarchy based on response status code
+  - Return parsed JSON response body on success (2xx)
+
+  ### Convenience methods
+  - `def get(self, path, *, params=None) -> dict`
+  - `def post(self, path, *, json_body=None) -> dict`
+  - `def put(self, path, *, json_body=None) -> dict`
+  - `def patch(self, path, *, json_body=None) -> dict`
+  - `def delete(self, path) -> dict`
+
+  ### Pagination method
+  `def paginate(self, path: str, *, params: dict | None = None, page_size: int | None = None, max_pages: int | None = None) -> Iterator[dict]`
+
+  Must support two pagination styles automatically detected from the response:
+  - **Cursor-based**: Response contains `{"data": [...], "next_cursor": "abc123"}`. Pass `cursor` param on subsequent requests. Stop when `next_cursor` is `null`.
+  - **Offset-based**: Response contains `{"data": [...], "total": 500, "offset": 0, "limit": 100}`. Increment `offset` by `limit`. Stop when `offset >= total`.
+
+  Yield individual items from `data` arrays, not full pages.
+
+  ## 5. Type Hints and Documentation
+
+  - Full PEP-484 type hints on all public methods, including return types.
+  - Google-style docstrings with Args, Returns, Raises sections on all public methods.
+  - Use `from __future__ import annotations` for modern annotation syntax.
+
+  Provide only the Python code for the complete module.
+temperature: 0.3
+max_output_tokens: 4096
+evaluation:
+  type: "code_execution"
+  language: "python"
+  dependencies:
+    - "requests"
+  test_cases:
+    - description: "Module imports without errors and all classes are accessible"
+    - description: "Exception hierarchy is correct (RateLimitError, AuthenticationError, ServerError, ResourceNotFoundError, ValidationError, NetworkError all inherit from APIError)"
+    - description: "APIClientConfig is a frozen dataclass with all specified fields and defaults"
+    - description: "RateLimiter implements token bucket correctly (burst allows immediate requests, then throttles)"
+    - description: "APIClient.request raises AuthenticationError on 401"
+    - description: "APIClient.request raises RateLimitError on 429 with retry_after parsed"
+    - description: "APIClient.request raises ServerError on 500 and retries up to max_retries"
+    - description: "APIClient.request raises ResourceNotFoundError on 404 without retry"
+    - description: "APIClient.request raises ValidationError on 422 with errors list"
+    - description: "APIClient.request implements exponential backoff with jitter on retries"
+    - description: "APIClient.paginate yields individual items across multiple pages (cursor-based)"
+    - description: "APIClient.paginate yields individual items across multiple pages (offset-based)"
+    - description: "APIClient.paginate respects max_pages limit"
+    - description: "All public methods have type hints and docstrings"

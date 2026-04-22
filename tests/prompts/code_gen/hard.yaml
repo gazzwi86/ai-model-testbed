@@ -1,0 +1,194 @@
+category: code_gen
+tier: hard
+name: "Distributed task queue with DAG resolution"
+description: "Tests ability to implement a distributed task queue with worker pools, DAG dependency resolution, dead letter queue, exactly-once semantics, adaptive backpressure, OpenTelemetry-style tracing, and graceful shutdown"
+prompt: |
+  Implement a Python module (`taskqueue.py`) containing a distributed task queue system. Use only the standard library (`asyncio`, `logging`, `dataclasses`, `enum`, `collections`, `time`, `uuid`, `typing`, `heapq`, `json`, `sqlite3`, `contextlib`, `weakref`, `signal`, `os`).
+
+  ## 1. Core Data Types
+
+  ### TaskState enum
+  `PENDING`, `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, `DEAD_LETTERED`, `CANCELLED`
+
+  ### TaskPriority enum
+  `LOW = 0`, `NORMAL = 1`, `HIGH = 2`, `CRITICAL = 3`
+
+  ### TaskDefinition dataclass (frozen)
+  Fields:
+  - `task_id: str` (UUID4)
+  - `name: str`
+  - `payload: dict[str, Any]`
+  - `priority: TaskPriority` (default NORMAL)
+  - `max_retries: int` (default 3)
+  - `timeout_seconds: float` (default 300.0)
+  - `idempotency_key: str | None` (default None -- for exactly-once semantics)
+  - `depends_on: frozenset[str]` (default empty -- task_ids this task depends on)
+  - `created_at: float` (default time.time())
+  - `metadata: dict[str, Any]` (default empty)
+
+  ### TaskResult dataclass
+  Fields:
+  - `task_id: str`
+  - `state: TaskState`
+  - `result: Any | None`
+  - `error: str | None`
+  - `attempts: int`
+  - `started_at: float | None`
+  - `completed_at: float | None`
+  - `worker_id: str | None`
+  - `trace_id: str | None`
+
+  ## 2. Span and Tracing (OpenTelemetry-style)
+
+  ### Span dataclass
+  Fields:
+  - `trace_id: str`
+  - `span_id: str`
+  - `parent_span_id: str | None`
+  - `operation: str`
+  - `start_time: float`
+  - `end_time: float | None`
+  - `status: str` ("OK", "ERROR", "TIMEOUT")
+  - `attributes: dict[str, Any]`
+  - `events: list[dict[str, Any]]` (timestamped events within the span)
+
+  ### TracingContext
+  - `start_span(self, operation: str, attributes: dict | None = None, parent: Span | None = None) -> Span`
+  - `end_span(self, span: Span, status: str = "OK") -> None`
+  - `add_event(self, span: Span, name: str, attributes: dict | None = None) -> None`
+  - `get_spans(self, trace_id: str) -> list[Span]` - All spans for a trace, ordered by start_time
+  - Context manager support: `with tracing.span("operation") as span: ...`
+
+  Spans must form a proper tree structure. Each task execution creates a root span with child spans for: dequeue, execute, retry_delay, completion/failure.
+
+  ## 3. DAG Dependency Resolver
+
+  ### DAGResolver class
+
+  - `add_task(self, task: TaskDefinition) -> None` - Register a task and its dependencies
+  - `get_ready_tasks(self) -> list[TaskDefinition]` - Return tasks whose dependencies have ALL completed successfully
+  - `mark_completed(self, task_id: str) -> None` - Mark a task as complete, potentially unblocking dependents
+  - `mark_failed(self, task_id: str) -> None` - Mark as failed. Any task depending on this (transitively) should be moved to CANCELLED state.
+  - `detect_cycles(self) -> list[list[str]]` - Return list of cycles found (each cycle is a list of task_ids). Uses Tarjan's algorithm or equivalent.
+  - `get_execution_order(self) -> list[list[str]]` - Return topological levels (tasks in the same level can run in parallel)
+
+  ## 4. Dead Letter Queue
+
+  ### DeadLetterQueue class
+  Backed by SQLite for persistence.
+
+  - `__init__(self, db_path: str)` - Creates table if not exists
+  - `async def enqueue(self, task: TaskDefinition, error: str, attempts: int) -> None`
+  - `async def peek(self, limit: int = 10) -> list[dict]` - View items without removing
+  - `async def retry(self, task_id: str) -> TaskDefinition | None` - Remove from DLQ and return for reprocessing
+  - `async def purge(self, older_than_seconds: float = 86400 * 7) -> int` - Remove old entries, return count
+  - `async def count(self) -> int`
+
+  ## 5. Exactly-Once Delivery via Idempotency
+
+  ### IdempotencyStore class
+  Backed by SQLite.
+
+  - `async def check_and_claim(self, idempotency_key: str, task_id: str) -> bool`
+    Returns `True` if this key was successfully claimed (first time seen). Returns `False` if already claimed by a different task_id (duplicate). If claimed by the same task_id, return `True` (retry of same task).
+
+  - `async def get_result(self, idempotency_key: str) -> TaskResult | None`
+    Return the cached result for a completed idempotent task.
+
+  - `async def store_result(self, idempotency_key: str, result: TaskResult) -> None`
+
+  ## 6. Adaptive Rate Limiter (Backpressure)
+
+  ### AdaptiveRateLimiter class
+  Implements AIMD (Additive Increase Multiplicative Decrease):
+
+  - `__init__(self, initial_rate: float = 100.0, min_rate: float = 1.0, max_rate: float = 10000.0)`
+  - `async def acquire(self) -> float` - Wait for permission, return wait time
+  - `def on_success(self) -> None` - Additively increase rate by `increase_step`
+  - `def on_failure(self) -> None` - Multiplicatively decrease rate by `decrease_factor` (0.5)
+  - `def on_timeout(self) -> None` - Aggressively decrease rate by `timeout_factor` (0.25)
+  - `@property current_rate(self) -> float`
+  - `@property utilization(self) -> float` - Current rate / max_rate
+
+  Track success/failure rates over a sliding window (last 60 seconds) to compute health metrics.
+
+  ## 7. Worker Pool
+
+  ### Worker class
+  Each worker has:
+  - `worker_id: str` (UUID4)
+  - `state: str` ("idle", "busy", "draining", "stopped")
+  - An async loop that pulls tasks from the queue and executes them
+
+  ### WorkerPool class
+  - `__init__(self, size: int, task_handler: Callable[[TaskDefinition], Awaitable[Any]])`
+  - `async def start(self) -> None` - Start all workers
+  - `async def scale(self, new_size: int) -> None` - Dynamically add or drain workers
+  - `async def shutdown(self, graceful: bool = True, timeout: float = 30.0) -> None`
+    If graceful: stop accepting new tasks, wait for in-flight tasks to complete (up to timeout), then force-cancel remaining. If not graceful: cancel all immediately.
+  - `@property active_workers(self) -> int`
+  - `@property busy_workers(self) -> int`
+  - `@property idle_workers(self) -> int`
+
+  ## 8. TaskQueue Orchestrator
+
+  ### TaskQueue class
+  This is the main entry point that ties everything together.
+
+  Constructor: `TaskQueue(handler: Callable, workers: int = 4, max_queue_size: int = 10000, db_path: str = ":memory:")`
+
+  Methods:
+  - `async def start(self) -> None` - Initialize all subsystems, register signal handlers for SIGTERM/SIGINT for graceful shutdown
+  - `async def submit(self, task: TaskDefinition) -> str` - Submit a task. Check idempotency, resolve dependencies, enqueue. Returns task_id.
+  - `async def submit_dag(self, tasks: list[TaskDefinition]) -> list[str]` - Submit a batch of tasks with inter-dependencies. Validate the DAG (detect cycles, raise `CyclicDependencyError`). Returns list of task_ids.
+  - `async def get_result(self, task_id: str, timeout: float = None) -> TaskResult` - Wait for a task to complete.
+  - `async def cancel(self, task_id: str) -> bool` - Cancel a pending/queued task. Cannot cancel running tasks.
+  - `async def shutdown(self, graceful: bool = True) -> None` - Shut down the entire system.
+  - `@property metrics(self) -> dict` - Return current metrics: queue_depth, active_workers, tasks_completed, tasks_failed, dlq_size, current_rate, p50_latency, p99_latency
+
+  Internal loop:
+  - Continuously check DAG resolver for ready tasks
+  - Apply rate limiter before dispatching to worker pool
+  - On task completion: update DAG, store result, check idempotency, record span
+  - On task failure after max_retries: move to dead letter queue, record span with ERROR status
+  - Maintain latency percentiles using a reservoir sampling approach
+
+  ## 9. Custom Exceptions
+  - `CyclicDependencyError(Exception)`: includes `cycles: list[list[str]]`
+  - `TaskNotFoundError(Exception)`: includes `task_id`
+  - `QueueFullError(Exception)`: includes `queue_size`, `max_size`
+  - `DuplicateTaskError(Exception)`: includes `idempotency_key`, `existing_task_id`
+  - `ShutdownInProgressError(Exception)`
+
+  ## 10. Structured Logging
+
+  All log output must use `logging.getLogger("taskqueue")` with structured context:
+  - Task lifecycle: task_id, task_name, state transitions, worker_id, attempt, duration_ms
+  - DAG events: task_id, dependencies_remaining, unblocked_tasks
+  - Rate limiter: current_rate, utilization, adjustment_reason
+  - Worker pool: worker_id, state, pool_size
+  - DLQ: task_id, error, attempt_count
+
+  Provide only the Python code for the complete module.
+temperature: 0.3
+max_output_tokens: 8192
+evaluation:
+  type: "code_execution"
+  language: "python"
+  test_cases:
+    - description: "Module imports without errors"
+    - description: "Submit and execute a simple task through the queue"
+    - description: "DAG resolution: tasks execute in dependency order (A->B->C executes A first, then B, then C)"
+    - description: "DAG cycle detection: CyclicDependencyError raised for circular dependencies"
+    - description: "Parallel DAG execution: independent tasks in same level run concurrently"
+    - description: "Dead letter queue: task moved to DLQ after max_retries exhausted"
+    - description: "Exactly-once: duplicate idempotency_key returns cached result without re-execution"
+    - description: "Adaptive rate limiter: rate decreases on failures, increases on successes"
+    - description: "Worker pool scaling: can dynamically add and remove workers"
+    - description: "Graceful shutdown: in-flight tasks complete before shutdown"
+    - description: "Task cancellation: pending tasks can be cancelled, running tasks cannot"
+    - description: "Tracing: task execution creates proper span tree with parent-child relationships"
+    - description: "Priority ordering: CRITICAL tasks dequeue before LOW tasks"
+    - description: "Task timeout enforcement: long-running tasks are cancelled after timeout_seconds"
+    - description: "Metrics reporting: queue_depth, active_workers, tasks_completed are accurate"
+    - description: "Failed dependency cascades: if A fails, B (depends on A) is cancelled"

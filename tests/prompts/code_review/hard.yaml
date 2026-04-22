@@ -1,0 +1,491 @@
+category: code_review
+tier: hard
+name: "Payment processing module review and refactor (14 issues)"
+description: "Tests ability to identify 14 issues in a ~500-line payment processing module including PCI DSS violations, insecure randomness, TOCTOU races, missing idempotency, SQL injection, hardcoded keys, and to produce a refactored architecture"
+prompt: |
+  Review and refactor the following payment processing module. This handles real credit card transactions in production. Identify all security vulnerabilities, PCI DSS compliance violations, architectural issues, and bugs. Then provide a refactored version of the most critical sections.
+
+  ```python
+  # payments/processor.py
+  import hashlib
+  import json
+  import logging
+  import os
+  import random
+  import sqlite3
+  import string
+  import time
+  import threading
+  from datetime import datetime, timedelta
+  from decimal import Decimal
+  from typing import Optional, Dict, Any
+  from dataclasses import dataclass, field
+
+  logger = logging.getLogger("payments")
+
+  # Database and encryption configuration
+  DB_PATH = "payments.db"
+  ENCRYPTION_KEY = b"aes256-key-do-not-share-12345678"
+  HMAC_SECRET = "webhook-verification-secret"
+  MERCHANT_ID = "merch_live_9f8e7d6c5b4a3210"
+
+  # Card brand detection patterns
+  CARD_PATTERNS = {
+      "visa": r"^4[0-9]{12}(?:[0-9]{3})?$",
+      "mastercard": r"^5[1-5][0-9]{14}$",
+      "amex": r"^3[47][0-9]{13}$",
+  }
+
+  @dataclass
+  class PaymentMethod:
+      card_number: str
+      cardholder_name: str
+      expiry_month: int
+      expiry_year: int
+      cvv: str
+      billing_zip: str = ""
+
+  @dataclass
+  class Transaction:
+      transaction_id: str
+      merchant_id: str
+      amount: float
+      currency: str
+      status: str  # pending, authorized, captured, refunded, failed
+      payment_method: Optional[PaymentMethod] = None
+      customer_id: str = ""
+      description: str = ""
+      metadata: Dict[str, Any] = field(default_factory=dict)
+      created_at: float = field(default_factory=time.time)
+      updated_at: float = field(default_factory=time.time)
+      error_message: str = ""
+      refund_amount: float = 0.0
+
+  class PaymentDatabase:
+      def __init__(self, db_path: str = DB_PATH):
+          self.conn = sqlite3.connect(db_path, check_same_thread=False)
+          self.conn.row_factory = sqlite3.Row
+          self._init_tables()
+
+      def _init_tables(self):
+          self.conn.executescript('''
+              CREATE TABLE IF NOT EXISTS transactions (
+                  transaction_id TEXT PRIMARY KEY,
+                  merchant_id TEXT NOT NULL,
+                  customer_id TEXT,
+                  amount REAL NOT NULL,
+                  currency TEXT NOT NULL DEFAULT 'USD',
+                  status TEXT NOT NULL DEFAULT 'pending',
+                  card_number TEXT,
+                  cardholder_name TEXT,
+                  card_expiry TEXT,
+                  card_last_four TEXT,
+                  description TEXT,
+                  metadata TEXT,
+                  error_message TEXT,
+                  refund_amount REAL DEFAULT 0,
+                  created_at REAL,
+                  updated_at REAL
+              );
+              CREATE TABLE IF NOT EXISTS audit_log (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  transaction_id TEXT,
+                  action TEXT,
+                  details TEXT,
+                  performed_by TEXT,
+                  timestamp REAL
+              );
+              CREATE TABLE IF NOT EXISTS daily_settlements (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  settlement_date TEXT,
+                  total_amount REAL,
+                  transaction_count INTEGER,
+                  status TEXT DEFAULT 'pending'
+              );
+          ''')
+          self.conn.commit()
+
+      def save_transaction(self, txn: Transaction) -> None:
+          card_num = ""
+          card_expiry = ""
+          card_name = ""
+          card_last_four = ""
+
+          if txn.payment_method:
+              card_num = txn.payment_method.card_number
+              card_expiry = f"{txn.payment_method.expiry_month}/{txn.payment_method.expiry_year}"
+              card_name = txn.payment_method.cardholder_name
+              card_last_four = txn.payment_method.card_number[-4:]
+
+          self.conn.execute(
+              '''INSERT OR REPLACE INTO transactions
+                 (transaction_id, merchant_id, customer_id, amount, currency, status,
+                  card_number, cardholder_name, card_expiry, card_last_four,
+                  description, metadata, error_message, refund_amount, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+              (txn.transaction_id, txn.merchant_id, txn.customer_id,
+               txn.amount, txn.currency, txn.status,
+               card_num, card_name, card_expiry, card_last_four,
+               txn.description, json.dumps(txn.metadata), txn.error_message,
+               txn.refund_amount, txn.created_at, txn.updated_at)
+          )
+          self.conn.commit()
+          logger.info(f"Transaction saved: {txn.transaction_id}, card={card_num}, amount={txn.amount}")
+
+      def get_transaction(self, transaction_id: str) -> Optional[dict]:
+          row = self.conn.execute(
+              "SELECT * FROM transactions WHERE transaction_id = ?",
+              (transaction_id,)
+          ).fetchone()
+          return dict(row) if row else None
+
+      def get_customer_transactions(self, customer_id: str, status: str = None) -> list:
+          query = f"SELECT * FROM transactions WHERE customer_id = '{customer_id}'"
+          if status:
+              query += f" AND status = '{status}'"
+          cursor = self.conn.execute(query)
+          return [dict(row) for row in cursor.fetchall()]
+
+      def get_settlement_report(self, start_date: str, end_date: str) -> dict:
+          query = f"""
+              SELECT currency, SUM(amount) as total, COUNT(*) as count
+              FROM transactions
+              WHERE status = 'captured'
+              AND created_at BETWEEN '{start_date}' AND '{end_date}'
+              GROUP BY currency
+          """
+          cursor = self.conn.execute(query)
+          results = {}
+          for row in cursor.fetchall():
+              results[row['currency']] = {
+                  'total': row['total'],
+                  'count': row['count']
+              }
+          return results
+
+  class FraudChecker:
+      VELOCITY_LIMIT = 10  # max transactions per hour per customer
+      AMOUNT_LIMIT = 10000  # max single transaction amount
+
+      def __init__(self, db: PaymentDatabase):
+          self.db = db
+
+      def check(self, customer_id: str, amount: float, card_number: str) -> dict:
+          result = {"approved": True, "reasons": []}
+
+          if amount > self.AMOUNT_LIMIT:
+              result["approved"] = False
+              result["reasons"].append(f"Amount ${amount} exceeds limit ${self.AMOUNT_LIMIT}")
+
+          if amount <= 0:
+              result["approved"] = False
+              result["reasons"].append("Invalid amount")
+
+          # Velocity check
+          one_hour_ago = time.time() - 3600
+          recent = self.db.conn.execute(
+              f"SELECT COUNT(*) FROM transactions WHERE customer_id = '{customer_id}' "
+              f"AND created_at > {one_hour_ago}"
+          ).fetchone()[0]
+
+          if recent >= self.VELOCITY_LIMIT:
+              result["approved"] = False
+              result["reasons"].append(f"Velocity limit exceeded: {recent} transactions in last hour")
+
+          logger.info(f"Fraud check for customer {customer_id}, card {card_number}: {result}")
+
+          return result
+
+  class PaymentGateway:
+      """Simulated payment gateway integration."""
+
+      def __init__(self, merchant_id: str = MERCHANT_ID):
+          self.merchant_id = merchant_id
+
+      def authorize(self, card_number: str, amount: float, currency: str, cvv: str) -> dict:
+          logger.info(f"Authorizing payment: card={card_number}, cvv={cvv}, amount={amount} {currency}")
+
+          # Simulate gateway response
+          if card_number.startswith("4000000000000002"):
+              return {"success": False, "error": "Card declined", "code": "card_declined"}
+
+          auth_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+          return {
+              "success": True,
+              "auth_code": auth_code,
+              "gateway_txn_id": f"gw_{''.join(random.choices(string.hexdigits, k=16))}",
+          }
+
+      def capture(self, gateway_txn_id: str, amount: float) -> dict:
+          return {"success": True, "capture_id": f"cap_{gateway_txn_id}"}
+
+      def refund(self, gateway_txn_id: str, amount: float) -> dict:
+          return {"success": True, "refund_id": f"ref_{gateway_txn_id}"}
+
+  class PaymentProcessor:
+      def __init__(self, db_path: str = DB_PATH):
+          self.db = PaymentDatabase(db_path)
+          self.gateway = PaymentGateway()
+          self.fraud = FraudChecker(self.db)
+          self._lock = threading.Lock()
+
+      def _generate_transaction_id(self) -> str:
+          timestamp = int(time.time() * 1000)
+          random_part = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+          return f"txn_{timestamp}_{random_part}"
+
+      def charge(self, customer_id: str, amount: float, currency: str,
+                 payment_method: PaymentMethod, description: str = "",
+                 metadata: dict = None) -> dict:
+
+          txn_id = self._generate_transaction_id()
+
+          # Create transaction record
+          txn = Transaction(
+              transaction_id=txn_id,
+              merchant_id=MERCHANT_ID,
+              amount=amount,
+              currency=currency,
+              status="pending",
+              payment_method=payment_method,
+              customer_id=customer_id,
+              description=description,
+              metadata=metadata or {},
+          )
+
+          # Save initial state
+          self.db.save_transaction(txn)
+
+          # Fraud check
+          fraud_result = self.fraud.check(customer_id, amount, payment_method.card_number)
+          if not fraud_result["approved"]:
+              txn.status = "failed"
+              txn.error_message = "; ".join(fraud_result["reasons"])
+              self.db.save_transaction(txn)
+              return {"success": False, "error": txn.error_message, "transaction_id": txn_id}
+
+          # Authorize with gateway
+          auth_result = self.gateway.authorize(
+              payment_method.card_number, amount, currency, payment_method.cvv
+          )
+
+          if not auth_result["success"]:
+              txn.status = "failed"
+              txn.error_message = auth_result["error"]
+              self.db.save_transaction(txn)
+              return {"success": False, "error": auth_result["error"], "transaction_id": txn_id}
+
+          txn.status = "authorized"
+          txn.metadata["auth_code"] = auth_result["auth_code"]
+          txn.metadata["gateway_txn_id"] = auth_result["gateway_txn_id"]
+          self.db.save_transaction(txn)
+
+          # Auto-capture
+          capture_result = self.gateway.capture(auth_result["gateway_txn_id"], amount)
+          if capture_result["success"]:
+              txn.status = "captured"
+              txn.metadata["capture_id"] = capture_result["capture_id"]
+          else:
+              txn.status = "failed"
+              txn.error_message = "Capture failed"
+
+          txn.updated_at = time.time()
+          self.db.save_transaction(txn)
+
+          logger.info(
+              f"Payment processed: txn={txn_id}, customer={customer_id}, "
+              f"card={payment_method.card_number}, cvv={payment_method.cvv}, "
+              f"amount={amount} {currency}, status={txn.status}"
+          )
+
+          return {
+              "success": txn.status == "captured",
+              "transaction_id": txn_id,
+              "status": txn.status,
+              "auth_code": auth_result.get("auth_code"),
+          }
+
+      def refund(self, transaction_id: str, amount: float = None,
+                 reason: str = "", performed_by: str = "system") -> dict:
+          txn_data = self.db.get_transaction(transaction_id)
+
+          if not txn_data:
+              return {"success": False, "error": "Transaction not found"}
+
+          if txn_data["status"] != "captured":
+              return {"success": False, "error": f"Cannot refund transaction in {txn_data['status']} state"}
+
+          refund_amount = amount or txn_data["amount"]
+
+          # Check refund doesn't exceed original amount
+          total_refunded = txn_data["refund_amount"] + refund_amount
+          if total_refunded > txn_data["amount"]:
+              return {"success": False, "error": "Refund exceeds original amount"}
+
+          gateway_txn_id = json.loads(txn_data["metadata"] or "{}").get("gateway_txn_id")
+          refund_result = self.gateway.refund(gateway_txn_id, refund_amount)
+
+          if refund_result["success"]:
+              new_refund_total = txn_data["refund_amount"] + refund_amount
+              status = "refunded" if new_refund_total >= txn_data["amount"] else "captured"
+
+              self.db.conn.execute(
+                  "UPDATE transactions SET refund_amount = ?, status = ?, updated_at = ? WHERE transaction_id = ?",
+                  (new_refund_total, status, time.time(), transaction_id)
+              )
+              self.db.conn.commit()
+
+              self.db.conn.execute(
+                  f"INSERT INTO audit_log (transaction_id, action, details, performed_by, timestamp) "
+                  f"VALUES ('{transaction_id}', 'refund', 'Refunded ${refund_amount} - {reason}', "
+                  f"'{performed_by}', {time.time()})"
+              )
+              self.db.conn.commit()
+
+              logger.info(f"Refund processed: txn={transaction_id}, amount={refund_amount}, by={performed_by}")
+              return {"success": True, "refund_amount": refund_amount}
+
+          return {"success": False, "error": "Gateway refund failed"}
+
+      def get_balance(self, customer_id: str) -> dict:
+          captured = self.db.conn.execute(
+              "SELECT SUM(amount) FROM transactions WHERE customer_id = ? AND status = 'captured'",
+              (customer_id,)
+          ).fetchone()[0] or 0
+
+          refunded = self.db.conn.execute(
+              "SELECT SUM(refund_amount) FROM transactions WHERE customer_id = ? AND status IN ('captured', 'refunded')",
+              (customer_id,)
+          ).fetchone()[0] or 0
+
+          return {"total_charged": captured, "total_refunded": refunded, "net": captured - refunded}
+
+      def process_webhook(self, payload: str, signature: str) -> dict:
+          # Verify webhook signature
+          expected = hashlib.sha256(f"{payload}{HMAC_SECRET}".encode()).hexdigest()
+          if signature != expected:
+              return {"error": "Invalid signature"}
+
+          data = json.loads(payload)
+          event = data.get("event")
+
+          if event == "payment.dispute":
+              txn_id = data["transaction_id"]
+              self.db.conn.execute(
+                  f"UPDATE transactions SET status = 'disputed' WHERE transaction_id = '{txn_id}'"
+              )
+              self.db.conn.commit()
+              logger.warning(f"Dispute received for transaction {txn_id}")
+
+          return {"processed": True}
+
+      def generate_daily_report(self, date_str: str) -> dict:
+          start = f"{date_str} 00:00:00"
+          end = f"{date_str} 23:59:59"
+
+          report = self.db.get_settlement_report(start, end)
+
+          total = sum(r['total'] for r in report.values())
+          count = sum(r['count'] for r in report.values())
+
+          self.db.conn.execute(
+              "INSERT INTO daily_settlements (settlement_date, total_amount, transaction_count, status) "
+              f"VALUES ('{date_str}', {total}, {count}, 'pending')"
+          )
+          self.db.conn.commit()
+
+          return {
+              "date": date_str,
+              "currencies": report,
+              "total_usd_equivalent": total,
+              "transaction_count": count,
+          }
+
+      def export_transactions(self, customer_id: str, format: str = "json") -> str:
+          txns = self.db.get_customer_transactions(customer_id)
+
+          if format == "json":
+              return json.dumps(txns, indent=2)
+          elif format == "csv":
+              if not txns:
+                  return ""
+              headers = txns[0].keys()
+              lines = [",".join(str(t.get(h, "")) for h in headers) for t in txns]
+              return ",".join(headers) + "\n" + "\n".join(lines)
+          elif format == "html":
+              html = "<table>"
+              if txns:
+                  html += "<tr>" + "".join(f"<th>{h}</th>" for h in txns[0].keys()) + "</tr>"
+                  for t in txns:
+                      html += "<tr>" + "".join(f"<td>{v}</td>" for v in t.values()) + "</tr>"
+              html += "</table>"
+              return html
+  ```
+
+  Provide:
+  1. A numbered list of every issue found with line numbers, severity (CRITICAL/HIGH/MEDIUM/LOW), category, and explanation.
+  2. For each CRITICAL and HIGH issue, provide the corrected code.
+  3. A refactored architecture proposal showing how this module should be restructured for PCI DSS compliance, including which data should never touch the application server.
+temperature: 0.3
+max_output_tokens: 8192
+evaluation:
+  type: "bug_detection"
+  checklist:
+    - id: "issue_1_card_number_stored"
+      description: "Full card numbers (PAN) are stored in the database in plaintext (save_transaction stores card_number). PCI DSS requires that PANs are either not stored or encrypted with proper key management. The CVV must NEVER be stored post-authorization."
+      severity: "critical"
+      category: "pci_compliance"
+    - id: "issue_2_card_number_logged"
+      description: "Full card numbers and CVVs are logged in plaintext in multiple places: save_transaction logs card_num, PaymentGateway.authorize logs card and cvv, PaymentProcessor.charge logs card_number and cvv. PCI DSS prohibits logging sensitive authentication data."
+      severity: "critical"
+      category: "pci_compliance"
+    - id: "issue_3_insecure_random"
+      description: "Transaction IDs are generated using random.choices() which uses a non-cryptographic PRNG (Mersenne Twister). Transaction IDs are predictable and could be enumerated. Gateway auth codes also use random.choices(). Must use secrets module."
+      severity: "high"
+      category: "security"
+    - id: "issue_4_hardcoded_keys"
+      description: "ENCRYPTION_KEY, HMAC_SECRET, and MERCHANT_ID are hardcoded in source code. These must be loaded from environment variables, a secrets manager, or HSM."
+      severity: "critical"
+      category: "security"
+    - id: "issue_5_no_idempotency"
+      description: "The charge() method has no idempotency mechanism. If a client retries due to network timeout, the same card could be charged multiple times. Must accept an idempotency key and return cached results for duplicate requests."
+      severity: "critical"
+      category: "reliability"
+    - id: "issue_6_toctou_refund"
+      description: "refund() has a TOCTOU race condition: it reads refund_amount, checks against original amount, then updates. Two concurrent partial refund requests could both pass validation and result in refunding more than the original amount. Must use SELECT FOR UPDATE or atomic SQL update with a WHERE clause check."
+      severity: "high"
+      category: "correctness"
+    - id: "issue_7_sql_injection"
+      description: "SQL injection in multiple methods: get_customer_transactions, get_settlement_report, process_webhook (transaction_id from webhook payload), generate_daily_report, and refund audit_log insert all use f-string interpolation."
+      severity: "critical"
+      category: "security"
+    - id: "issue_8_no_audit_trail"
+      description: "Only refunds write to audit_log. Charges, status changes, disputes, and failed transactions are not audited. PCI DSS requires comprehensive audit trails for all access to cardholder data and all actions taken by individuals with access."
+      severity: "high"
+      category: "pci_compliance"
+    - id: "issue_9_float_for_money"
+      description: "Transaction amounts use float type instead of Decimal. Floating point arithmetic causes rounding errors in financial calculations (e.g., 0.1 + 0.2 != 0.3). All monetary values must use Decimal with explicit precision."
+      severity: "high"
+      category: "correctness"
+    - id: "issue_10_webhook_signature"
+      description: "Webhook signature verification uses simple SHA256(payload + secret) concatenation instead of proper HMAC. Also uses == comparison instead of hmac.compare_digest(), making it vulnerable to timing attacks. The concatenation approach is also vulnerable to length extension attacks."
+      severity: "high"
+      category: "security"
+    - id: "issue_11_no_input_validation"
+      description: "No validation on currency codes (could be arbitrary strings), amount ranges (no minimum/maximum beyond fraud check), card number format (no Luhn check), expiry dates (no validation that card isn't expired), or CVV format."
+      severity: "high"
+      category: "input_validation"
+    - id: "issue_12_xss_export"
+      description: "export_transactions HTML format inserts transaction data (including user-supplied fields like description) directly into HTML without escaping, enabling XSS attacks."
+      severity: "medium"
+      category: "security"
+    - id: "issue_13_csv_injection"
+      description: "export_transactions CSV format does not escape or quote fields. Values containing commas, newlines, or formula characters (=, +, -, @) could cause CSV injection when opened in spreadsheet software."
+      severity: "medium"
+      category: "security"
+    - id: "issue_14_fraud_check_logging"
+      description: "FraudChecker.check() logs the full card number in its info message. Also has SQL injection in the velocity check query via customer_id."
+      severity: "critical"
+      category: "pci_compliance"
+  pass_threshold: 10
+  max_false_positives: 5

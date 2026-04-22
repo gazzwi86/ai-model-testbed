@@ -1,0 +1,29 @@
+category: reasoning
+tier: simple
+name: "CAP theorem for executives"
+description: "Tests ability to explain a complex distributed systems concept accurately in exactly 3 sentences for a non-technical audience"
+prompt: |
+  Explain the CAP theorem to a non-technical executive in exactly 3 sentences. Your explanation must:
+
+  1. Accurately convey what the three properties are (Consistency, Availability, Partition tolerance) without using those technical terms directly
+  2. Explain the trade-off (you can only guarantee two of the three)
+  3. Give a concrete business analogy that makes the trade-off intuitive
+
+  Do not use jargon. Do not use the words "node", "distributed", "replicate", or "latency". Write as if explaining to someone who manages a retail chain, not a technology company.
+temperature: 0.7
+max_output_tokens: 256
+evaluation:
+  type: "reasoning"
+  criteria:
+    - name: "accuracy"
+      description: "Correctly conveys the CAP theorem trade-off without technical errors or oversimplification that distorts the concept"
+      weight: 0.35
+    - name: "accessibility"
+      description: "Genuinely understandable by a non-technical executive. No jargon, no forbidden words."
+      weight: 0.30
+    - name: "conciseness"
+      description: "Exactly 3 sentences, no more, no less"
+      weight: 0.15
+    - name: "analogy_quality"
+      description: "Business analogy is concrete, intuitive, and accurately maps to the CAP trade-off"
+      weight: 0.20

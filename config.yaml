@@ -1,0 +1,120 @@
+ollama:
+  base_url: "http://localhost:11434"
+  default_params:
+    temperature: 0.3
+    num_ctx: 8192
+
+models:
+  local:
+    - id: "gemma4:e4b"
+      name: "Gemma 4 E4B"
+      params: "4B"
+      active_params: "4B"
+      size_gb: 9.6
+      num_ctx: 16384
+      notes: "Lightweight, fast. Primary MDAP microagent candidate."
+
+    - id: "gemma4:26b"
+      name: "Gemma 4 26B MoE"
+      params: "26B MoE"
+      active_params: "3.8B"
+      size_gb: 15
+      num_ctx: 8192
+      notes: "MoE flagship. 3.8B active. Best quality-per-watt."
+
+    - id: "gemma4:31b"
+      name: "Gemma 4 31B Dense"
+      params: "31B"
+      active_params: "31B"
+      size_gb: 19
+      num_ctx: 4096
+      notes: "Max quality, very tight memory. Context severely limited on 24GB."
+
+    - id: "qwen3.5:9b"
+      name: "Qwen 3.5 9B"
+      params: "9B"
+      active_params: "9B"
+      size_gb: 6.6
+      num_ctx: 16384
+      notes: "Hybrid thinking. Good all-rounder and MDAP candidate."
+
+    - id: "qwen3.5:27b"
+      name: "Qwen 3.5 27B"
+      params: "27B"
+      active_params: "27B"
+      size_gb: 17
+      num_ctx: 4096
+      notes: "Large Qwen. Strong reasoning. Context limited on 24GB."
+
+    - id: "deepseek-r1:14b"
+      name: "DeepSeek R1 Distill 14B"
+      params: "14B"
+      active_params: "14B"
+      size_gb: 9
+      num_ctx: 8192
+      notes: "Reasoning specialist. CoT."
+
+    - id: "deepseek-coder:6.7b"
+      name: "DeepSeek Coder 6.7B"
+      params: "6.7B"
+      active_params: "6.7B"
+      size_gb: 3.8
+      num_ctx: 16384
+      notes: "Coding specialist. Fast."
+
+    - id: "mistral-small3.2"
+      name: "Mistral Small 3.2"
+      params: "24B"
+      active_params: "24B"
+      size_gb: 15
+      num_ctx: 8192
+      notes: "Latest Mistral Small. Strong instruction following."
+
+  frontier:
+    - id: "claude-haiku-4-5-20251001"
+      name: "Claude Haiku 4.5"
+      input_price_per_mtok: 1.00
+      output_price_per_mtok: 5.00
+
+    - id: "claude-sonnet-4-6"
+      name: "Claude Sonnet 4.6"
+      input_price_per_mtok: 3.00
+      output_price_per_mtok: 15.00
+
+    - id: "claude-opus-4-6"
+      name: "Claude Opus 4.6"
+      input_price_per_mtok: 5.00
+      output_price_per_mtok: 25.00
+
+test_params:
+  runs_per_test: 3
+  temperature_code: 0.3
+  temperature_writing: 0.7
+  mdap_k: 5
+  mdap_k_sensitivity: 7
+
+local_cost:
+  power_watts: 30
+  electricity_per_kwh_gbp: 0.30
+  hardware_cost_gbp: 2499
+  amortisation_years: 3
+  gbp_to_usd: 1.28
+  # Derived: ~GBP0.10/hour = ~$0.13/hour
+
+evaluation:
+  llm_judge_model: "claude-sonnet-4-6"
+  embedding_model: "all-MiniLM-L6-v2"
+
+categories:
+  - code_gen
+  - code_review
+  - summarisation
+  - writing
+  - data_analysis
+  - reasoning
+  - tool_use
+
+tiers:
+  - simple
+  - medium
+  - hard

@@ -1,0 +1,129 @@
+category: data_analysis
+tier: simple
+name: "JSON dataset statistics"
+description: "Tests ability to write Python code that computes descriptive statistics per column from a JSON dataset with mixed column types"
+prompt: |
+  Given the following JSON dataset (100 employee records with 5 fields), write a Python script that computes:
+
+  - For each numeric column (age, salary, performance_score): mean, median, and standard deviation (rounded to 2 decimal places)
+  - For each categorical column (department, level): count of unique values and the frequency of each value
+
+  Use only the Python standard library (json, statistics, collections). Print the results in a clean, readable format.
+
+  ```json
+  [
+    {"name": "Employee_001", "department": "Engineering", "level": "Senior", "age": 34, "salary": 125000, "performance_score": 4.2},
+    {"name": "Employee_002", "department": "Marketing", "level": "Junior", "age": 26, "salary": 62000, "performance_score": 3.8},
+    {"name": "Employee_003", "department": "Engineering", "level": "Mid", "age": 29, "salary": 95000, "performance_score": 4.5},
+    {"name": "Employee_004", "department": "Sales", "level": "Senior", "age": 41, "salary": 110000, "performance_score": 3.1},
+    {"name": "Employee_005", "department": "Engineering", "level": "Junior", "age": 23, "salary": 72000, "performance_score": 3.9},
+    {"name": "Employee_006", "department": "HR", "level": "Mid", "age": 35, "salary": 85000, "performance_score": 4.0},
+    {"name": "Employee_007", "department": "Marketing", "level": "Senior", "age": 38, "salary": 105000, "performance_score": 4.7},
+    {"name": "Employee_008", "department": "Engineering", "level": "Senior", "age": 45, "salary": 145000, "performance_score": 4.8},
+    {"name": "Employee_009", "department": "Sales", "level": "Junior", "age": 24, "salary": 58000, "performance_score": 3.3},
+    {"name": "Employee_010", "department": "Engineering", "level": "Mid", "age": 31, "salary": 102000, "performance_score": 4.1},
+    {"name": "Employee_011", "department": "HR", "level": "Senior", "age": 42, "salary": 98000, "performance_score": 4.4},
+    {"name": "Employee_012", "department": "Marketing", "level": "Mid", "age": 30, "salary": 78000, "performance_score": 3.6},
+    {"name": "Employee_013", "department": "Engineering", "level": "Lead", "age": 39, "salary": 155000, "performance_score": 4.9},
+    {"name": "Employee_014", "department": "Sales", "level": "Mid", "age": 33, "salary": 82000, "performance_score": 3.5},
+    {"name": "Employee_015", "department": "Engineering", "level": "Junior", "age": 22, "salary": 68000, "performance_score": 3.7},
+    {"name": "Employee_016", "department": "HR", "level": "Junior", "age": 25, "salary": 55000, "performance_score": 3.2},
+    {"name": "Employee_017", "department": "Marketing", "level": "Lead", "age": 44, "salary": 130000, "performance_score": 4.6},
+    {"name": "Employee_018", "department": "Engineering", "level": "Mid", "age": 28, "salary": 92000, "performance_score": 4.3},
+    {"name": "Employee_019", "department": "Sales", "level": "Senior", "age": 37, "salary": 108000, "performance_score": 3.9},
+    {"name": "Employee_020", "department": "Engineering", "level": "Senior", "age": 40, "salary": 138000, "performance_score": 4.5},
+    {"name": "Employee_021", "department": "HR", "level": "Mid", "age": 32, "salary": 80000, "performance_score": 3.8},
+    {"name": "Employee_022", "department": "Marketing", "level": "Junior", "age": 24, "salary": 60000, "performance_score": 3.4},
+    {"name": "Employee_023", "department": "Engineering", "level": "Mid", "age": 30, "salary": 98000, "performance_score": 4.2},
+    {"name": "Employee_024", "department": "Sales", "level": "Mid", "age": 29, "salary": 76000, "performance_score": 3.7},
+    {"name": "Employee_025", "department": "Engineering", "level": "Lead", "age": 46, "salary": 160000, "performance_score": 4.8},
+    {"name": "Employee_026", "department": "HR", "level": "Senior", "age": 43, "salary": 95000, "performance_score": 4.1},
+    {"name": "Employee_027", "department": "Marketing", "level": "Mid", "age": 31, "salary": 82000, "performance_score": 3.9},
+    {"name": "Employee_028", "department": "Sales", "level": "Junior", "age": 23, "salary": 56000, "performance_score": 3.0},
+    {"name": "Employee_029", "department": "Engineering", "level": "Junior", "age": 25, "salary": 74000, "performance_score": 4.0},
+    {"name": "Employee_030", "department": "HR", "level": "Junior", "age": 26, "salary": 57000, "performance_score": 3.5},
+    {"name": "Employee_031", "department": "Marketing", "level": "Senior", "age": 39, "salary": 112000, "performance_score": 4.3},
+    {"name": "Employee_032", "department": "Engineering", "level": "Senior", "age": 36, "salary": 132000, "performance_score": 4.6},
+    {"name": "Employee_033", "department": "Sales", "level": "Senior", "age": 40, "salary": 115000, "performance_score": 4.0},
+    {"name": "Employee_034", "department": "Engineering", "level": "Mid", "age": 27, "salary": 90000, "performance_score": 4.1},
+    {"name": "Employee_035", "department": "HR", "level": "Lead", "age": 47, "salary": 120000, "performance_score": 4.5},
+    {"name": "Employee_036", "department": "Marketing", "level": "Junior", "age": 22, "salary": 55000, "performance_score": 3.1},
+    {"name": "Employee_037", "department": "Sales", "level": "Mid", "age": 34, "salary": 88000, "performance_score": 3.8},
+    {"name": "Employee_038", "department": "Engineering", "level": "Mid", "age": 32, "salary": 100000, "performance_score": 4.4},
+    {"name": "Employee_039", "department": "HR", "level": "Mid", "age": 33, "salary": 83000, "performance_score": 3.9},
+    {"name": "Employee_040", "department": "Marketing", "level": "Mid", "age": 28, "salary": 75000, "performance_score": 3.7},
+    {"name": "Employee_041", "department": "Engineering", "level": "Junior", "age": 24, "salary": 70000, "performance_score": 3.8},
+    {"name": "Employee_042", "department": "Sales", "level": "Lead", "age": 45, "salary": 140000, "performance_score": 4.7},
+    {"name": "Employee_043", "department": "Engineering", "level": "Lead", "age": 42, "salary": 152000, "performance_score": 4.9},
+    {"name": "Employee_044", "department": "HR", "level": "Senior", "age": 38, "salary": 92000, "performance_score": 4.2},
+    {"name": "Employee_045", "department": "Marketing", "level": "Senior", "age": 41, "salary": 118000, "performance_score": 4.4},
+    {"name": "Employee_046", "department": "Sales", "level": "Junior", "age": 25, "salary": 60000, "performance_score": 3.2},
+    {"name": "Employee_047", "department": "Engineering", "level": "Senior", "age": 37, "salary": 135000, "performance_score": 4.7},
+    {"name": "Employee_048", "department": "HR", "level": "Junior", "age": 23, "salary": 52000, "performance_score": 3.3},
+    {"name": "Employee_049", "department": "Marketing", "level": "Lead", "age": 43, "salary": 128000, "performance_score": 4.5},
+    {"name": "Employee_050", "department": "Sales", "level": "Mid", "age": 30, "salary": 80000, "performance_score": 3.6},
+    {"name": "Employee_051", "department": "Engineering", "level": "Mid", "age": 29, "salary": 96000, "performance_score": 4.3},
+    {"name": "Employee_052", "department": "HR", "level": "Mid", "age": 31, "salary": 78000, "performance_score": 3.7},
+    {"name": "Employee_053", "department": "Marketing", "level": "Junior", "age": 21, "salary": 53000, "performance_score": 3.0},
+    {"name": "Employee_054", "department": "Sales", "level": "Senior", "age": 44, "salary": 122000, "performance_score": 4.1},
+    {"name": "Employee_055", "department": "Engineering", "level": "Senior", "age": 35, "salary": 128000, "performance_score": 4.4},
+    {"name": "Employee_056", "department": "HR", "level": "Lead", "age": 48, "salary": 115000, "performance_score": 4.6},
+    {"name": "Employee_057", "department": "Marketing", "level": "Mid", "age": 33, "salary": 85000, "performance_score": 4.0},
+    {"name": "Employee_058", "department": "Sales", "level": "Mid", "age": 28, "salary": 74000, "performance_score": 3.4},
+    {"name": "Employee_059", "department": "Engineering", "level": "Junior", "age": 22, "salary": 66000, "performance_score": 3.6},
+    {"name": "Employee_060", "department": "HR", "level": "Senior", "age": 40, "salary": 96000, "performance_score": 4.3},
+    {"name": "Employee_061", "department": "Marketing", "level": "Senior", "age": 36, "salary": 108000, "performance_score": 4.2},
+    {"name": "Employee_062", "department": "Sales", "level": "Junior", "age": 26, "salary": 62000, "performance_score": 3.5},
+    {"name": "Employee_063", "department": "Engineering", "level": "Lead", "age": 41, "salary": 148000, "performance_score": 4.7},
+    {"name": "Employee_064", "department": "HR", "level": "Junior", "age": 24, "salary": 54000, "performance_score": 3.1},
+    {"name": "Employee_065", "department": "Marketing", "level": "Mid", "age": 32, "salary": 80000, "performance_score": 3.8},
+    {"name": "Employee_066", "department": "Sales", "level": "Lead", "age": 46, "salary": 138000, "performance_score": 4.8},
+    {"name": "Employee_067", "department": "Engineering", "level": "Mid", "age": 26, "salary": 88000, "performance_score": 4.0},
+    {"name": "Employee_068", "department": "HR", "level": "Mid", "age": 34, "salary": 82000, "performance_score": 3.9},
+    {"name": "Employee_069", "department": "Marketing", "level": "Junior", "age": 23, "salary": 58000, "performance_score": 3.3},
+    {"name": "Employee_070", "department": "Sales", "level": "Senior", "age": 38, "salary": 112000, "performance_score": 4.2},
+    {"name": "Employee_071", "department": "Engineering", "level": "Senior", "age": 43, "salary": 142000, "performance_score": 4.8},
+    {"name": "Employee_072", "department": "HR", "level": "Mid", "age": 29, "salary": 76000, "performance_score": 3.6},
+    {"name": "Employee_073", "department": "Marketing", "level": "Lead", "age": 40, "salary": 125000, "performance_score": 4.6},
+    {"name": "Employee_074", "department": "Sales", "level": "Mid", "age": 31, "salary": 78000, "performance_score": 3.7},
+    {"name": "Employee_075", "department": "Engineering", "level": "Junior", "age": 21, "salary": 65000, "performance_score": 3.5},
+    {"name": "Employee_076", "department": "HR", "level": "Senior", "age": 39, "salary": 94000, "performance_score": 4.0},
+    {"name": "Employee_077", "department": "Marketing", "level": "Mid", "age": 27, "salary": 72000, "performance_score": 3.5},
+    {"name": "Employee_078", "department": "Sales", "level": "Junior", "age": 22, "salary": 55000, "performance_score": 2.9},
+    {"name": "Employee_079", "department": "Engineering", "level": "Mid", "age": 33, "salary": 104000, "performance_score": 4.3},
+    {"name": "Employee_080", "department": "HR", "level": "Junior", "age": 25, "salary": 56000, "performance_score": 3.4},
+    {"name": "Employee_081", "department": "Marketing", "level": "Senior", "age": 37, "salary": 110000, "performance_score": 4.1},
+    {"name": "Employee_082", "department": "Sales", "level": "Senior", "age": 42, "salary": 118000, "performance_score": 4.3},
+    {"name": "Employee_083", "department": "Engineering", "level": "Mid", "age": 28, "salary": 94000, "performance_score": 4.2},
+    {"name": "Employee_084", "department": "HR", "level": "Lead", "age": 45, "salary": 118000, "performance_score": 4.7},
+    {"name": "Employee_085", "department": "Marketing", "level": "Junior", "age": 24, "salary": 61000, "performance_score": 3.6},
+    {"name": "Employee_086", "department": "Sales", "level": "Mid", "age": 35, "salary": 86000, "performance_score": 3.9},
+    {"name": "Employee_087", "department": "Engineering", "level": "Senior", "age": 44, "salary": 140000, "performance_score": 4.6},
+    {"name": "Employee_088", "department": "HR", "level": "Mid", "age": 30, "salary": 79000, "performance_score": 3.8},
+    {"name": "Employee_089", "department": "Marketing", "level": "Mid", "age": 29, "salary": 76000, "performance_score": 3.7},
+    {"name": "Employee_090", "department": "Sales", "level": "Lead", "age": 47, "salary": 142000, "performance_score": 4.9},
+    {"name": "Employee_091", "department": "Engineering", "level": "Junior", "age": 23, "salary": 69000, "performance_score": 3.9},
+    {"name": "Employee_092", "department": "HR", "level": "Junior", "age": 22, "salary": 51000, "performance_score": 3.0},
+    {"name": "Employee_093", "department": "Marketing", "level": "Senior", "age": 38, "salary": 115000, "performance_score": 4.5},
+    {"name": "Employee_094", "department": "Sales", "level": "Junior", "age": 24, "salary": 57000, "performance_score": 3.1},
+    {"name": "Employee_095", "department": "Engineering", "level": "Lead", "age": 48, "salary": 162000, "performance_score": 5.0},
+    {"name": "Employee_096", "department": "HR", "level": "Senior", "age": 41, "salary": 97000, "performance_score": 4.4},
+    {"name": "Employee_097", "department": "Marketing", "level": "Mid", "age": 34, "salary": 84000, "performance_score": 4.0},
+    {"name": "Employee_098", "department": "Sales", "level": "Mid", "age": 32, "salary": 81000, "performance_score": 3.8},
+    {"name": "Employee_099", "department": "Engineering", "level": "Mid", "age": 27, "salary": 91000, "performance_score": 4.1},
+    {"name": "Employee_100", "department": "HR", "level": "Mid", "age": 36, "salary": 84000, "performance_score": 4.0}
+  ]
+  ```
+
+  Provide only the Python code, no explanation.
+temperature: 0.3
+max_output_tokens: 1024
+evaluation:
+  type: "data"
+  language: "python"
+  test_cases:
+    - description: "Script runs without errors"
+    - description: "Computes mean, median, and stddev for age, salary, and performance_score"
+    - description: "Computes unique counts and frequencies for department and level"
+    - description: "Uses only standard library modules"
+    - description: "Output is readable and well-formatted"

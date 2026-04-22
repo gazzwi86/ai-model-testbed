@@ -1,0 +1,56 @@
+category: summarisation
+tier: simple
+name: "Meeting transcript to bullets"
+description: "Tests ability to extract decisions, actions, and owners from a 500-word meeting transcript into exactly 3 bullet points"
+prompt: |
+  Summarise the following meeting transcript into exactly 3 bullet points covering: (1) key decisions made, (2) action items, and (3) owners and deadlines. Be concise and specific.
+
+  ---
+
+  **Project Phoenix Weekly Sync - March 15, 2026**
+  **Attendees:** Sarah Chen (Engineering Lead), Marcus Williams (Product Manager), Priya Patel (Design Lead), James O'Brien (QA Lead), Lisa Nakamura (DevOps)
+
+  Sarah: Alright, let's get started. First item - the API migration. We've been going back and forth on whether to do a big-bang cutover or a phased approach. After last week's incident where the legacy endpoint dropped 2% of requests during peak, I think we need to make a call.
+
+  Marcus: I've talked to the three biggest enterprise clients. Two of them said they need at least 4 weeks notice before any breaking changes. GlobalTech specifically said they can't migrate until after their April 10th release.
+
+  Sarah: Okay, so big-bang is off the table. Let's go phased. We'll run both endpoints in parallel until April 30th. That gives everyone enough runway.
+
+  Priya: That works for the front-end team too. We can update the dashboard to use the new endpoints incrementally. I'd suggest we start with the read-only endpoints first since those are lower risk.
+
+  Sarah: Agreed. Priya, can you have the dashboard updated for the read-only endpoints by March 28th?
+
+  Priya: Yes, that's doable. I'll need the updated API docs from Sarah's team by March 20th though.
+
+  Sarah: I'll have Tom put those together. James, how are we looking on test coverage for the new endpoints?
+
+  James: We're at 73% right now. I want to get to at least 90% before we start routing production traffic. My team needs about two more weeks, so we'd be ready by March 29th. The main gap is error handling edge cases - the timeout and retry scenarios.
+
+  Lisa: From the infrastructure side, I need to set up the traffic splitting configuration. I'll use the feature flag system we already have. I can have that ready by March 22nd. One concern though - we'll need to monitor both endpoints simultaneously, which means updating our Grafana dashboards. I'll need a day for that.
+
+  Marcus: I also want to send a migration guide to all API consumers. I'll draft that by March 18th and send it to Sarah for technical review before distributing it on March 21st.
+
+  Sarah: Good. Let's also set up a dedicated Slack channel for migration support. Marcus, can you own that?
+
+  Marcus: Sure. I'll create #phoenix-api-migration today.
+
+  Sarah: Last thing - budget. Lisa, the parallel running will increase our compute costs. Can you estimate the additional spend?
+
+  Lisa: Rough estimate, about $3,200/month extra for the parallel period. I'll have exact numbers by Thursday.
+
+  Sarah: That's within our contingency budget. Alright, I think we're aligned. Let's recap the timeline and reconvene next week.
+temperature: 0.7
+max_output_tokens: 512
+evaluation:
+  type: "summary"
+  criteria:
+    - name: "decisions_captured"
+      description: "Must mention: phased migration (not big-bang), parallel endpoints until April 30, read-only endpoints first"
+      weight: 0.35
+    - name: "actions_captured"
+      description: "Must mention key actions: API docs by Mar 20, dashboard update by Mar 28, test coverage to 90% by Mar 29, traffic splitting by Mar 22, migration guide draft by Mar 18, Slack channel creation, cost estimate by Thursday"
+      weight: 0.35
+    - name: "owners_captured"
+      description: "Must correctly attribute owners: Priya (dashboard), Sarah/Tom (API docs), James (test coverage), Lisa (traffic splitting, cost estimate), Marcus (migration guide, Slack channel)"
+      weight: 0.30
+  max_bullet_points: 3

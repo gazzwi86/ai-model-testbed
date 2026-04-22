@@ -1,0 +1,7 @@
+id,name,email,department,join_date,salary
+# Expected cleaned format:
+# - All dates normalised to ISO 8601 (YYYY-MM-DD)
+# - Missing values unified to empty string (not "N/A", "null", "-", "None")
+# - Exact duplicate rows removed (200 raw rows -> 190 unique rows)
+# - Department names consistently title-cased ("Engineering", "Sales", etc.)
+# - Leading/trailing whitespace stripped from all fields

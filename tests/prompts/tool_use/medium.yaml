@@ -1,0 +1,186 @@
+category: tool_use
+tier: medium
+name: "Multi-step research with citations"
+description: "Tests ability to chain multiple tool calls in sequence: search articles, extract claims, and draft a summary with proper citations"
+prompt: |
+  You are a research assistant with access to the following tools. Your task is to research the topic "impact of remote work on software engineering productivity" and produce a summary with citations.
+
+  ## Available Tools
+
+  ```json
+  {
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "search_articles",
+          "description": "Search for academic and industry articles on a topic",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query string"
+              },
+              "source_type": {
+                "type": "string",
+                "enum": ["academic", "industry", "all"],
+                "description": "Type of sources to search",
+                "default": "all"
+              },
+              "date_range": {
+                "type": "object",
+                "properties": {
+                  "start": { "type": "string", "description": "Start date (YYYY-MM-DD)" },
+                  "end": { "type": "string", "description": "End date (YYYY-MM-DD)" }
+                }
+              },
+              "max_results": {
+                "type": "integer",
+                "description": "Maximum number of results to return",
+                "default": 10,
+                "maximum": 50
+              }
+            },
+            "required": ["query"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_article_content",
+          "description": "Retrieve the full text content of an article by its ID",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "article_id": {
+                "type": "string",
+                "description": "The unique identifier of the article"
+              },
+              "sections": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["abstract", "introduction", "methodology", "results", "conclusion", "full"]
+                },
+                "description": "Which sections to retrieve. Defaults to ['abstract'].",
+                "default": ["abstract"]
+              }
+            },
+            "required": ["article_id"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "extract_claims",
+          "description": "Extract specific factual claims from article text, with confidence scores",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "article_id": {
+                "type": "string",
+                "description": "The article to extract claims from"
+              },
+              "claim_types": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["statistical", "causal", "comparative", "definitional", "predictive"]
+                },
+                "description": "Types of claims to extract",
+                "default": ["statistical", "causal", "comparative"]
+              }
+            },
+            "required": ["article_id"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "draft_summary",
+          "description": "Generate a structured summary from collected claims and sources",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "topic": {
+                "type": "string",
+                "description": "The topic being summarised"
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "claim": { "type": "string" },
+                    "source_id": { "type": "string" },
+                    "confidence": { "type": "number" }
+                  }
+                },
+                "description": "List of claims with source attributions"
+              },
+              "format": {
+                "type": "string",
+                "enum": ["executive_brief", "literature_review", "bullet_points"],
+                "description": "Output format for the summary"
+              },
+              "max_words": {
+                "type": "integer",
+                "description": "Maximum word count for the summary",
+                "default": 500
+              },
+              "citation_style": {
+                "type": "string",
+                "enum": ["apa", "chicago", "inline"],
+                "description": "Citation formatting style",
+                "default": "inline"
+              }
+            },
+            "required": ["topic", "claims", "format"]
+          }
+        }
+      }
+    ]
+  }
+  ```
+
+  ## Instructions
+
+  Execute the following multi-step research workflow. For each step, show the exact function call you would make (in JSON format) and explain what you expect to receive back and how it informs the next step.
+
+  **Step 1:** Search for relevant articles published between 2022-01-01 and 2025-12-31. Search both academic and industry sources. Use a well-crafted query that will surface high-quality results.
+
+  **Step 2:** From the search results, select the 3 most relevant articles. For each, retrieve the abstract and results sections.
+
+  **Step 3:** Extract statistical and causal claims from each of the 3 articles.
+
+  **Step 4:** Draft an executive brief (max 400 words) using inline citations, incorporating the extracted claims.
+
+  Format your response as:
+  ```
+  ### Step N: <description>
+  **Function call:**
+  { ... }
+  **Expected output:** <brief description>
+  **Reasoning for next step:** <how this output informs step N+1>
+  ```
+temperature: 0.3
+max_output_tokens: 2048
+evaluation:
+  type: "tool_use"
+  criteria:
+    - name: "correct_tool_selection"
+      description: "Uses the right tool for each step (search_articles -> get_article_content -> extract_claims -> draft_summary)"
+      weight: 0.25
+    - name: "parameter_correctness"
+      description: "All required parameters provided, optional parameters used appropriately (date_range, sections, claim_types, format, citation_style)"
+      weight: 0.25
+    - name: "logical_chaining"
+      description: "Each step logically follows from the previous. Output from step N is correctly referenced as input to step N+1 (article_ids flow from search to get_content to extract_claims, claims flow to draft_summary)"
+      weight: 0.25
+    - name: "reasoning_quality"
+      description: "Explanations of expected outputs and reasoning between steps demonstrate understanding of the workflow"
+      weight: 0.25

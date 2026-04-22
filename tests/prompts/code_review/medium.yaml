@@ -1,0 +1,419 @@
+category: code_review
+tier: medium
+name: "Authentication module review (10 vulnerabilities)"
+description: "Tests ability to identify 10 planted security vulnerabilities in a ~300-line authentication module: hardcoded JWT secret, missing expiry validation, IDOR, MD5 passwords, no brute-force protection, session fixation, race condition in token refresh, timing attack, insecure token generation, and missing HTTPS enforcement"
+prompt: |
+  Review the following authentication module for security vulnerabilities, architectural issues, and bugs. This is deployed in production handling user authentication for a SaaS application with 50K users. Identify all problems and provide corrected code.
+
+  ```python
+  import hashlib
+  import json
+  import os
+  import sqlite3
+  import time
+  import hmac
+  import base64
+  import threading
+  from dataclasses import dataclass, field
+  from typing import Optional
+  from http.server import HTTPServer, BaseHTTPRequestHandler
+
+  # Configuration
+  JWT_SECRET = "my-jwt-secret-key-2024"
+  TOKEN_EXPIRY = 3600  # 1 hour
+  REFRESH_TOKEN_EXPIRY = 86400 * 30  # 30 days
+  MAX_SESSIONS = 5
+  DB_PATH = "auth.db"
+
+  @dataclass
+  class User:
+      id: int
+      username: str
+      email: str
+      password_hash: str
+      role: str = "user"
+      is_active: bool = True
+      failed_logins: int = 0
+      last_login: float = 0.0
+
+  @dataclass
+  class Session:
+      session_id: str
+      user_id: int
+      access_token: str
+      refresh_token: str
+      created_at: float
+      last_active: float
+      ip_address: str
+      user_agent: str
+
+  class AuthDB:
+      def __init__(self, db_path: str = DB_PATH):
+          self.conn = sqlite3.connect(db_path, check_same_thread=False)
+          self.conn.row_factory = sqlite3.Row
+          self._init_tables()
+
+      def _init_tables(self):
+          self.conn.executescript('''
+              CREATE TABLE IF NOT EXISTS users (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  username TEXT UNIQUE NOT NULL,
+                  email TEXT UNIQUE NOT NULL,
+                  password_hash TEXT NOT NULL,
+                  role TEXT DEFAULT 'user',
+                  is_active INTEGER DEFAULT 1,
+                  failed_logins INTEGER DEFAULT 0,
+                  last_login REAL DEFAULT 0,
+                  created_at REAL DEFAULT (strftime('%s', 'now'))
+              );
+              CREATE TABLE IF NOT EXISTS sessions (
+                  session_id TEXT PRIMARY KEY,
+                  user_id INTEGER NOT NULL,
+                  access_token TEXT NOT NULL,
+                  refresh_token TEXT NOT NULL,
+                  created_at REAL NOT NULL,
+                  last_active REAL NOT NULL,
+                  ip_address TEXT,
+                  user_agent TEXT,
+                  FOREIGN KEY (user_id) REFERENCES users(id)
+              );
+              CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                  token TEXT PRIMARY KEY,
+                  user_id INTEGER NOT NULL,
+                  created_at REAL NOT NULL,
+                  used INTEGER DEFAULT 0,
+                  FOREIGN KEY (user_id) REFERENCES users(id)
+              );
+          ''')
+          self.conn.commit()
+
+  class PasswordManager:
+      @staticmethod
+      def hash_password(password: str) -> str:
+          return hashlib.md5(password.encode()).hexdigest()
+
+      @staticmethod
+      def verify_password(password: str, password_hash: str) -> bool:
+          return hashlib.md5(password.encode()).hexdigest() == password_hash
+
+      @staticmethod
+      def validate_strength(password: str) -> bool:
+          return len(password) >= 6
+
+  class TokenManager:
+      def __init__(self, secret: str = JWT_SECRET):
+          self.secret = secret
+
+      def create_access_token(self, user_id: int, role: str) -> str:
+          header = base64.urlsafe_b64encode(json.dumps({
+              "alg": "HS256", "typ": "JWT"
+          }).encode()).decode().rstrip('=')
+
+          payload = base64.urlsafe_b64encode(json.dumps({
+              "user_id": user_id,
+              "role": role,
+              "iat": time.time(),
+              "exp": time.time() + TOKEN_EXPIRY
+          }).encode()).decode().rstrip('=')
+
+          signature = hashlib.sha256(
+              f"{header}.{payload}.{self.secret}".encode()
+          ).hexdigest()
+
+          return f"{header}.{payload}.{signature}"
+
+      def create_refresh_token(self) -> str:
+          return hashlib.sha256(
+              str(time.time()).encode()
+          ).hexdigest()
+
+      def decode_token(self, token: str) -> Optional[dict]:
+          try:
+              parts = token.split('.')
+              if len(parts) != 3:
+                  return None
+
+              header_b64, payload_b64, signature = parts
+
+              # Verify signature
+              expected_sig = hashlib.sha256(
+                  f"{header_b64}.{payload_b64}.{self.secret}".encode()
+              ).hexdigest()
+
+              if signature == expected_sig:
+                  padding = 4 - len(payload_b64) % 4
+                  payload_b64 += '=' * padding
+                  payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+                  return payload
+
+              return None
+          except Exception:
+              return None
+
+      def verify_token(self, token: str) -> Optional[dict]:
+          payload = self.decode_token(token)
+          if payload:
+              return payload  # Token is valid if signature matches
+          return None
+
+  class AuthService:
+      def __init__(self):
+          self.db = AuthDB()
+          self.token_mgr = TokenManager()
+          self._refresh_locks = {}
+
+      def register(self, username: str, email: str, password: str) -> dict:
+          if not PasswordManager.validate_strength(password):
+              return {"error": "Password too weak", "code": 400}
+
+          pw_hash = PasswordManager.hash_password(password)
+
+          try:
+              self.db.conn.execute(
+                  "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
+                  (username, email, pw_hash)
+              )
+              self.db.conn.commit()
+              return {"message": "User registered", "code": 201}
+          except sqlite3.IntegrityError:
+              return {"error": "Username or email already exists", "code": 409}
+
+      def login(self, username: str, password: str, ip_address: str = "", user_agent: str = "") -> dict:
+          row = self.db.conn.execute(
+              "SELECT * FROM users WHERE username = ?", (username,)
+          ).fetchone()
+
+          if not row:
+              return {"error": "Invalid credentials", "code": 401}
+
+          user = User(**dict(row))
+
+          if not user.is_active:
+              return {"error": "Account disabled", "code": 403}
+
+          if not PasswordManager.verify_password(password, user.password_hash):
+              self.db.conn.execute(
+                  "UPDATE users SET failed_logins = failed_logins + 1 WHERE id = ?",
+                  (user.id,)
+              )
+              self.db.conn.commit()
+              return {"error": "Invalid credentials", "code": 401}
+
+          # Reset failed logins on success
+          self.db.conn.execute(
+              "UPDATE users SET failed_logins = 0, last_login = ? WHERE id = ?",
+              (time.time(), user.id)
+          )
+          self.db.conn.commit()
+
+          access_token = self.token_mgr.create_access_token(user.id, user.role)
+          refresh_token = self.token_mgr.create_refresh_token()
+
+          session_id = hashlib.md5(
+              f"{user.id}:{time.time()}".encode()
+          ).hexdigest()
+
+          self.db.conn.execute(
+              "INSERT INTO sessions (session_id, user_id, access_token, refresh_token, "
+              "created_at, last_active, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              (session_id, user.id, access_token, refresh_token,
+               time.time(), time.time(), ip_address, user_agent)
+          )
+          self.db.conn.commit()
+
+          return {
+              "access_token": access_token,
+              "refresh_token": refresh_token,
+              "session_id": session_id,
+              "expires_in": TOKEN_EXPIRY,
+              "code": 200
+          }
+
+      def get_user(self, requesting_user_id: int, target_user_id: int) -> dict:
+          row = self.db.conn.execute(
+              "SELECT id, username, email, role, is_active, last_login FROM users WHERE id = ?",
+              (target_user_id,)
+          ).fetchone()
+
+          if not row:
+              return {"error": "User not found", "code": 404}
+
+          return {"user": dict(row), "code": 200}
+
+      def update_user(self, requesting_user_id: int, target_user_id: int, updates: dict) -> dict:
+          allowed_fields = ['email', 'username', 'role']
+          set_clauses = []
+          values = []
+
+          for field_name in updates:
+              if field_name in allowed_fields:
+                  set_clauses.append(f"{field_name} = ?")
+                  values.append(updates[field_name])
+
+          if not set_clauses:
+              return {"error": "No valid fields to update", "code": 400}
+
+          values.append(target_user_id)
+          query = f"UPDATE users SET {', '.join(set_clauses)} WHERE id = ?"
+          self.db.conn.execute(query, values)
+          self.db.conn.commit()
+          return {"message": "User updated", "code": 200}
+
+      def refresh_access_token(self, refresh_token: str, session_id: str) -> dict:
+          row = self.db.conn.execute(
+              "SELECT * FROM sessions WHERE session_id = ? AND refresh_token = ?",
+              (session_id, refresh_token)
+          ).fetchone()
+
+          if not row:
+              return {"error": "Invalid refresh token", "code": 401}
+
+          session = dict(row)
+
+          # Check if refresh token is expired
+          if time.time() - session['created_at'] > REFRESH_TOKEN_EXPIRY:
+              self.db.conn.execute(
+                  "DELETE FROM sessions WHERE session_id = ?", (session_id,)
+              )
+              self.db.conn.commit()
+              return {"error": "Refresh token expired", "code": 401}
+
+          # Get user for new token
+          user_row = self.db.conn.execute(
+              "SELECT id, role FROM users WHERE id = ?", (session['user_id'],)
+          ).fetchone()
+
+          new_access_token = self.token_mgr.create_access_token(user_row['id'], user_row['role'])
+
+          # Update session with new token
+          self.db.conn.execute(
+              "UPDATE sessions SET access_token = ?, last_active = ? WHERE session_id = ?",
+              (new_access_token, time.time(), session_id)
+          )
+          self.db.conn.commit()
+
+          return {
+              "access_token": new_access_token,
+              "expires_in": TOKEN_EXPIRY,
+              "code": 200
+          }
+
+      def authenticate_request(self, auth_header: str) -> Optional[dict]:
+          if not auth_header or not auth_header.startswith('Bearer '):
+              return None
+
+          token = auth_header[7:]
+          payload = self.token_mgr.verify_token(token)
+          return payload
+
+      def request_password_reset(self, email: str) -> dict:
+          row = self.db.conn.execute(
+              "SELECT id FROM users WHERE email = ?", (email,)
+          ).fetchone()
+
+          if not row:
+              return {"error": "Email not found", "code": 404}
+
+          reset_token = hashlib.md5(
+              f"{row['id']}:{time.time()}".encode()
+          ).hexdigest()
+
+          self.db.conn.execute(
+              "INSERT INTO password_reset_tokens (token, user_id, created_at) VALUES (?, ?, ?)",
+              (reset_token, row['id'], time.time())
+          )
+          self.db.conn.commit()
+
+          return {"reset_token": reset_token, "code": 200}
+
+      def reset_password(self, reset_token: str, new_password: str) -> dict:
+          row = self.db.conn.execute(
+              "SELECT user_id, created_at, used FROM password_reset_tokens WHERE token = ?",
+              (reset_token,)
+          ).fetchone()
+
+          if not row:
+              return {"error": "Invalid reset token", "code": 400}
+
+          if row['used']:
+              return {"error": "Token already used", "code": 400}
+
+          # No expiry check on reset token
+
+          new_hash = PasswordManager.hash_password(new_password)
+          self.db.conn.execute(
+              "UPDATE users SET password_hash = ? WHERE id = ?",
+              (new_hash, row['user_id'])
+          )
+          self.db.conn.execute(
+              "UPDATE password_reset_tokens SET used = 1 WHERE token = ?",
+              (reset_token,)
+          )
+          self.db.conn.commit()
+
+          # Don't invalidate existing sessions after password change
+
+          return {"message": "Password reset successful", "code": 200}
+
+      def logout(self, session_id: str) -> dict:
+          self.db.conn.execute(
+              "DELETE FROM sessions WHERE session_id = ?", (session_id,)
+          )
+          self.db.conn.commit()
+          return {"message": "Logged out", "code": 200}
+  ```
+
+  For each issue found, provide:
+  1. The line number(s) affected
+  2. Severity: CRITICAL, HIGH, MEDIUM, LOW
+  3. Category: authentication, authorization, cryptography, session management, or input validation
+  4. The specific vulnerability type (e.g., CWE-XXX if applicable)
+  5. A clear explanation of how it could be exploited in practice
+  6. The corrected code for that section
+temperature: 0.3
+max_output_tokens: 6144
+evaluation:
+  type: "bug_detection"
+  checklist:
+    - id: "vuln_1_hardcoded_jwt_secret"
+      description: "JWT_SECRET is hardcoded as a weak string in source code. Anyone with access to the codebase (or who guesses the simple value) can forge arbitrary JWT tokens, impersonate any user, and escalate privileges."
+      severity: "critical"
+      category: "cryptography"
+    - id: "vuln_2_no_expiry_validation"
+      description: "verify_token (TokenManager) checks the signature but never validates the 'exp' claim. Expired tokens remain valid indefinitely, defeating the purpose of token expiry."
+      severity: "critical"
+      category: "authentication"
+    - id: "vuln_3_idor"
+      description: "get_user and update_user accept target_user_id without checking if requesting_user_id has permission to view/modify that user. Any authenticated user can view or modify any other user's profile, including changing roles to 'admin'."
+      severity: "critical"
+      category: "authorization"
+    - id: "vuln_4_md5_passwords"
+      description: "PasswordManager uses plain MD5 without salt for password hashing. MD5 is cryptographically broken and trivially reversible via rainbow tables. Must use bcrypt, scrypt, or argon2id with per-user salt."
+      severity: "critical"
+      category: "cryptography"
+    - id: "vuln_5_no_brute_force_protection"
+      description: "Login increments failed_logins counter but never locks the account or introduces delays. No rate limiting on the login endpoint. Attacker can brute-force passwords at full speed."
+      severity: "high"
+      category: "authentication"
+    - id: "vuln_6_weak_session_id"
+      description: "Session IDs are generated using MD5 of user_id + timestamp, which is predictable. Combined with the weak session ID generation, attackers could predict or brute-force valid session IDs. Should use os.urandom() or secrets.token_hex()."
+      severity: "high"
+      category: "session management"
+    - id: "vuln_7_race_condition_refresh"
+      description: "refresh_access_token has a race condition: if two concurrent requests refresh the same session, both read the old token, both generate new tokens, and the last write wins. The _refresh_locks dict is defined but never used. Could lead to token theft or session corruption."
+      severity: "high"
+      category: "session management"
+    - id: "vuln_8_timing_attack"
+      description: "JWT signature comparison uses == operator (decode_token), which is vulnerable to timing side-channel attacks. An attacker can iteratively guess the signature byte-by-byte. Must use hmac.compare_digest() for constant-time comparison."
+      severity: "medium"
+      category: "cryptography"
+    - id: "vuln_9_weak_refresh_token"
+      description: "create_refresh_token generates tokens using SHA256 of the current timestamp, which is predictable. An attacker who knows the approximate login time can guess the refresh token. Must use secrets.token_hex() or os.urandom()."
+      severity: "high"
+      category: "cryptography"
+    - id: "vuln_10_password_reset_no_expiry"
+      description: "reset_password does not check if the reset token has expired (no expiry check on created_at). A leaked or stolen reset token remains valid forever. Also does not invalidate existing sessions after password change, so compromised sessions persist."
+      severity: "high"
+      category: "authentication"
+  pass_threshold: 7
+  max_false_positives: 4

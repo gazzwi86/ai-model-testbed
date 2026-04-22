@@ -1,0 +1,220 @@
+category: summarisation
+tier: hard
+name: "RFP response analysis"
+description: "Tests ability to analyse a 12,000-word RFP response identifying compliance gaps, risk areas, pricing anomalies, and missing deliverables"
+prompt: |
+  You are a procurement analyst reviewing a vendor's RFP response. Analyse the following response and produce a structured assessment covering: (1) compliance gaps where requirements are not fully met, (2) risk areas, (3) pricing anomalies or concerns, and (4) missing deliverables. Be specific and cite section numbers.
+
+  ---
+
+  # RFP Response: Enterprise Data Platform Modernisation
+  ## Vendor: DataStream Solutions Inc.
+  ## Submitted: March 1, 2026
+
+  ### Section 1: Executive Summary
+
+  DataStream Solutions is pleased to submit this proposal for the Enterprise Data Platform Modernisation project. With over 15 years of experience in data engineering and a team of 200+ certified professionals, we are confident in our ability to deliver a world-class data platform that meets your organisation's current and future needs. Our proposal covers the full scope of requirements outlined in RFP-2026-0142, including data ingestion, transformation, storage, analytics, and governance capabilities.
+
+  We propose a 14-month implementation timeline with a phased approach, beginning with core infrastructure and data ingestion in Phase 1, followed by analytics and reporting in Phase 2, and advanced capabilities (ML/AI integration, real-time streaming) in Phase 3. Our total proposed investment is $4.2 million, which includes licensing, implementation services, training, and 12 months of post-go-live support.
+
+  ### Section 2: Technical Architecture
+
+  #### 2.1 Data Ingestion Layer
+
+  We propose using Apache NiFi for batch data ingestion and Apache Kafka for streaming data. NiFi will handle the 47 identified source systems, including ERP (SAP S/4HANA), CRM (Salesforce), and 12 legacy flat-file feeds. Kafka will support real-time event streams from IoT sensors and transactional systems.
+
+  Our ingestion layer will support the following protocols: JDBC, SFTP, REST API, SOAP, OData, and custom file formats (CSV, JSON, XML, Parquet, Avro). We will implement schema-on-read for the data lake layer and schema-on-write for the data warehouse layer.
+
+  Note: The RFP requirement R-ING-08 specifies support for CDC (Change Data Capture) from Oracle and DB2 databases. We plan to address this using Kafka Connect with Debezium connectors. However, our experience with Debezium on DB2 for z/OS is limited, and we recommend a proof-of-concept phase to validate this integration before committing to a firm timeline for DB2 CDC specifically.
+
+  #### 2.2 Storage and Processing
+
+  We recommend a lakehouse architecture using Delta Lake on AWS S3 for the storage layer, with Databricks as the primary processing engine. This provides ACID transactions, schema enforcement, and time travel capabilities.
+
+  The data warehouse layer will be implemented using Amazon Redshift Serverless for structured analytics workloads. We selected Redshift Serverless over Redshift Provisioned to optimise costs during off-peak periods.
+
+  Data will be organised into three zones:
+  - **Bronze (Raw):** Ingested data in original format with metadata tags
+  - **Silver (Curated):** Cleaned, deduplicated, and conformed data
+  - **Gold (Consumption):** Business-ready datasets, aggregations, and feature stores
+
+  Storage retention: Bronze zone data will be retained for 24 months with automatic tiering to S3 Glacier after 6 months. Silver and Gold zone data will be retained for 7 years per regulatory requirements.
+
+  Note: The RFP requirement R-STO-03 specifies that all data at rest must be encrypted using customer-managed keys (CMK). Our proposed architecture uses AWS-managed keys (SSE-S3) by default. Migration to CMK (SSE-KMS) is possible but will require additional configuration and an estimated $18,000/year increase in KMS costs, which is not included in our base pricing.
+
+  #### 2.3 Analytics and Reporting
+
+  We propose Tableau as the primary BI tool for self-service analytics, with 50 Creator licenses, 200 Explorer licenses, and unlimited Viewer licenses. Tableau will connect to Redshift for interactive queries and to Databricks SQL endpoints for large-scale analytical queries.
+
+  We will deliver 35 pre-built dashboards covering the 8 business domains identified in the RFP. Custom dashboard development beyond the 35 included dashboards will be billed at our standard rate of $2,400 per dashboard.
+
+  For advanced analytics, we propose integrating Databricks ML Runtime for model training and MLflow for model lifecycle management.
+
+  Note: The RFP requirement R-ANA-05 specifies that the BI tool must support embedded analytics in the client's customer-facing portal. Tableau supports embedding via Tableau Embedded Analytics, but this requires a separate Tableau Embedded Analytics Server license, estimated at $150,000/year, which is not included in our proposal. We recommend discussing this requirement further during contract negotiations.
+
+  #### 2.4 Data Governance and Quality
+
+  We will implement a data governance framework using Collibra as the data catalog and governance platform. This includes:
+  - Automated data lineage tracking from source to consumption
+  - Business glossary with 500+ predefined terms
+  - Data quality rules engine with 200+ pre-configured rules
+  - Data access policies with role-based access control
+
+  Data quality monitoring will use Great Expectations integrated into the Databricks processing pipelines. Quality scores will be published to Collibra dashboards.
+
+  #### 2.5 Security and Compliance
+
+  Our platform implements defense-in-depth security:
+  - Network: VPC isolation, private subnets, NACLs, security groups
+  - Identity: Integration with client's Azure AD via SAML 2.0
+  - Data: Column-level encryption for PII, dynamic data masking
+  - Audit: CloudTrail logging, Databricks audit logs forwarded to SIEM
+
+  Compliance frameworks supported: SOC 2 Type II, GDPR, CCPA, HIPAA.
+
+  Note: The RFP requirement R-SEC-12 mandates FedRAMP Moderate authorisation for all cloud components. Databricks is FedRAMP Moderate authorised. However, Collibra's cloud offering is currently FedRAMP In Process (expected authorisation Q3 2026). We propose using Collibra's on-premise deployment option until cloud FedRAMP is achieved, though this increases implementation complexity and cost by approximately $85,000.
+
+  ### Section 3: Implementation Approach
+
+  #### 3.1 Timeline
+
+  | Phase | Duration | Key Deliverables |
+  |-------|----------|-----------------|
+  | Phase 0: Discovery & Design | Weeks 1-6 | Architecture design, source system analysis, governance framework design |
+  | Phase 1: Core Infrastructure | Weeks 7-18 | Cloud infrastructure, ingestion pipelines for top 20 sources, Bronze/Silver zones |
+  | Phase 2: Analytics & Governance | Weeks 19-34 | Redshift deployment, Tableau dashboards (35), Collibra catalog, remaining source integrations |
+  | Phase 3: Advanced Capabilities | Weeks 35-52 | ML/AI integration, real-time streaming, performance optimisation |
+  | Phase 4: Hypercare | Weeks 53-60 | Post-go-live support, knowledge transfer, defect resolution |
+
+  Total duration: 60 weeks (approximately 14 months)
+
+  Note: The RFP specifies a 12-month implementation deadline (R-PRJ-01). Our proposed 14-month timeline exceeds this by 2 months. We believe the additional time is necessary to ensure quality delivery given the scope. We are open to discussing scope prioritisation or additional resourcing to meet the 12-month target, though additional resourcing would increase costs by an estimated $380,000.
+
+  #### 3.2 Team Composition
+
+  - Project Manager (1, full-time)
+  - Solution Architect (1, full-time through Phase 2, part-time Phase 3-4)
+  - Data Engineers (4, full-time)
+  - BI Developers (2, full-time during Phase 2-3)
+  - Data Governance Analyst (1, full-time during Phase 2-4)
+  - QA Engineer (1, full-time)
+  - DevOps Engineer (1, full-time)
+  - Change Management Consultant (1, part-time)
+
+  Total: 12 team members (8.5 FTE average)
+
+  Note: The RFP requirement R-PRJ-04 specifies that the vendor must provide a dedicated Security Engineer throughout the project. Our proposal does not include a dedicated Security Engineer. Security responsibilities are distributed across the Solution Architect and DevOps Engineer. We can add a dedicated Security Engineer at an additional cost of $22,000/month.
+
+  #### 3.3 Knowledge Transfer
+
+  We will conduct 10 training sessions covering platform administration, data engineering workflows, BI dashboard development, and governance processes. Each session is 4 hours with hands-on labs. Training materials will be provided in digital format.
+
+  Note: The RFP requirement R-PRJ-07 specifies that the vendor must provide a runbook for all operational procedures and a video training library. Our proposal includes written runbooks but does not include video training content. Video production can be added for an estimated $45,000.
+
+  ### Section 4: Pricing
+
+  #### 4.1 Implementation Services
+
+  | Component | Cost |
+  |-----------|------|
+  | Phase 0: Discovery & Design | $280,000 |
+  | Phase 1: Core Infrastructure | $1,150,000 |
+  | Phase 2: Analytics & Governance | $1,080,000 |
+  | Phase 3: Advanced Capabilities | $720,000 |
+  | Phase 4: Hypercare (8 weeks) | $320,000 |
+  | **Subtotal Implementation** | **$3,550,000** |
+
+  #### 4.2 Software Licensing (Annual)
+
+  | Product | Annual Cost |
+  |---------|------------|
+  | Databricks (Enterprise, estimated usage) | $480,000 |
+  | Tableau (50 Creator + 200 Explorer) | $312,000 |
+  | Collibra (Data Intelligence Cloud) | $185,000 |
+  | AWS Infrastructure (estimated) | $216,000 |
+  | **Subtotal Licensing Year 1** | **$1,193,000** |
+
+  Note: AWS infrastructure costs are estimates based on anticipated usage. Actual costs may vary by +/- 30%. DataStream Solutions does not guarantee AWS costs.
+
+  #### 4.3 Ongoing Support (Post-Hypercare)
+
+  | Tier | Monthly Cost | SLA |
+  |------|-------------|-----|
+  | Standard (business hours, 8-hour response) | $18,000 | 99.5% uptime |
+  | Premium (24/7, 2-hour response for P1) | $32,000 | 99.9% uptime |
+  | Enterprise (24/7, 30-min response for P1, dedicated TAM) | $55,000 | 99.95% uptime |
+
+  We recommend the Premium tier for the first 12 months post-hypercare.
+
+  #### 4.4 Total First-Year Cost
+
+  | Item | Cost |
+  |------|------|
+  | Implementation Services | $3,550,000 |
+  | Software Licensing Year 1 | $1,193,000 |
+  | Support (Premium, ~5 months post-hypercare in Y1) | $160,000 |
+  | **Total Year 1** | **$4,903,000** |
+
+  Note: The executive summary states a total proposed investment of $4.2 million, but the detailed pricing totals $4,903,000. The $4.2M figure does not include the support costs or the full licensing costs, as these were calculated after the executive summary was drafted.
+
+  ### Section 5: Risk Management
+
+  | Risk | Mitigation |
+  |------|-----------|
+  | Legacy source system documentation gaps | Allocate additional discovery time; reverse-engineer schemas |
+  | Data quality issues in source systems | Implement progressive quality rules; don't block on imperfect data |
+  | Organisational resistance to new governance processes | Change management programme with executive sponsorship |
+  | Cloud cost overruns | Monthly cost reviews, reserved instance recommendations at 6-month mark |
+  | Key personnel departure | Cross-training, documentation, 30-day replacement guarantee |
+
+  ### Section 6: References
+
+  - MegaCorp Industries: Data lake implementation, 2024 (contact: John Smith, CTO)
+  - Federal Agency XYZ: Analytics platform, 2023 (contact: available upon request)
+  - Regional Bank Group: Data warehouse modernisation, 2025 (contact: Maria Garcia, VP Data)
+
+  Note: The RFP requires a minimum of 5 references with direct contact information (R-PRJ-10). We have provided 3 references, one without direct contact information.
+
+  ### Section 7: Assumptions and Dependencies
+
+  1. Client will provide dedicated business SMEs (minimum 0.5 FTE per business domain) for requirements validation and UAT.
+  2. Client's Azure AD will be configured for SAML federation prior to Phase 1 completion.
+  3. Network connectivity between on-premise source systems and AWS VPC will be established by client prior to Phase 1.
+  4. Client will procure all software licenses directly. Costs shown are estimates for budgeting purposes.
+  5. Any scope changes after Phase 0 will be handled through a formal change request process and may impact timeline and cost.
+
+  ---
+
+  Produce your assessment in the following format:
+
+  ## Compliance Gaps
+  For each gap, cite the RFP requirement number, describe the gap, note the vendor's proposed workaround (if any), and assess the risk level (critical/high/medium/low).
+
+  ## Risk Areas
+  Identify areas where the proposal introduces risk beyond what the vendor has acknowledged.
+
+  ## Pricing Anomalies
+  Flag any inconsistencies, missing costs, or areas where pricing seems unreasonable.
+
+  ## Missing Deliverables
+  List any deliverables required by the RFP that are not addressed in the response.
+
+  ## Overall Assessment
+  A brief (3-5 sentence) overall assessment with a recommendation.
+temperature: 0.7
+max_output_tokens: 2048
+evaluation:
+  type: "summary"
+  criteria:
+    - name: "compliance_gaps_identified"
+      description: "Must identify: CMK encryption gap (R-STO-03), FedRAMP gap for Collibra (R-SEC-12), timeline exceeds 12-month requirement (R-PRJ-01), no dedicated Security Engineer (R-PRJ-04), no video training (R-PRJ-07), DB2 CDC uncertainty (R-ING-08), embedded analytics not included (R-ANA-05), insufficient references (R-PRJ-10)"
+      weight: 0.30
+    - name: "pricing_anomalies_found"
+      description: "Must identify: exec summary says $4.2M but detailed pricing totals $4.9M, AWS costs disclaimed with +/-30% variance, multiple requirements excluded from base pricing that add up significantly (CMK $18K, embedded analytics $150K, security engineer $264K+, video training $45K, timeline acceleration $380K), Collibra on-prem workaround adds $85K"
+      weight: 0.25
+    - name: "risk_areas_identified"
+      description: "Must identify risks beyond vendor's list: vendor lock-in (Databricks+AWS), DB2 CDC unproven, licensing procured by client shifts risk, no fixed AWS costs, scope change mechanism could drive costs higher"
+      weight: 0.25
+    - name: "missing_deliverables_found"
+      description: "Must identify: video training library, embedded analytics capability, 2 additional references with contact info, dedicated security engineer"
+      weight: 0.20

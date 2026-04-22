@@ -1,0 +1,23 @@
+name: "url_shortener"
+task_type: "code"
+description: "Generate a complete Python module implementing a URL shortener service"
+
+prompt: |
+  Build a complete Python module implementing a URL shortener service with:
+  1. URL validation (http/https only, valid netloc required)
+  2. Base62 encoding (0-9, a-z, A-Z)
+  3. SQLite storage (store, lookup, delete expired)
+  4. Collision detection with retry (up to 10 attempts)
+  5. Expiry handling (URLs can have optional expiration)
+  6. CLI interface with argparse: 'shorten <url> [--expires-in-hours N]', 'resolve <code>', 'cleanup'
+
+  Requirements:
+  - Use only stdlib (no external dependencies)
+  - Include type hints
+  - Handle edge cases (empty input, invalid URLs, expired entries)
+  - Use context managers for database connections
+
+integration_test_file: "tests/mdap/tasks/url_shortener/test_integration.py"
+
+temperature: 0.3
+max_output_tokens: 4000

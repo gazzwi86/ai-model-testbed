@@ -1,0 +1,65 @@
+category: data_analysis
+tier: medium
+name: "Messy CSV cleaning"
+description: "Tests ability to write robust data cleaning code handling mixed date formats, missing value representations, duplicates, and inconsistent casing"
+prompt: |
+  Write a Python script using only the standard library (csv, datetime, re, collections) that cleans the following messy CSV data and outputs a clean version. The script should read from stdin and write to stdout.
+
+  Input CSV:
+  ```
+  id,name,email,signup_date,plan,monthly_spend,country,status
+  1,John Smith,john@example.com,2024-01-15,Premium,49.99,United States,active
+  2,jane doe,JANE@EXAMPLE.COM,01/15/2024,premium,49.99,US,Active
+  3,Bob Wilson,bob@example.com,15-Jan-2024,Basic,N/A,united states,active
+  4,Alice Brown,alice@example.com,2024/01/16,PREMIUM,79.99,Canada,ACTIVE
+  5,Charlie Lee,charlie@example.com,Jan 17 2024,basic,29.99,canada,inactive
+  6,John Smith,john@example.com,2024-01-15,Premium,49.99,United States,active
+  7,Diana Ross,diana@example.com,2024-01-18,,-,UK,
+  8,Eve Martinez,eve@example.com,18/01/2024,Premium,null,United Kingdom,active
+  9,Frank Chen,,2024-01-19,Basic,19.99,Canada,active
+  10,Grace Kim,grace@example.com,,Premium,59.99,US,active
+  11,JOHN SMITH,JOHN@EXAMPLE.COM,2024-01-15,premium,49.99,usa,Active
+  12,Hank Brown,hank@example.com,2024-01-20,Basic,29.99,United States,active
+  13,Ivy Chang,ivy@example.com,20 January 2024,Premium,NULL,Canada,active
+  14,Jack White,jack@example.com,2024-01-21,Gold,99.99,US,active
+  15,Kate Green,kate@example.com,01-22-2024,basic,,United States,inactive
+  16,Leo Adams,leo@example.com,2024-01-22,Premium,49.99,United states,active
+  17,Mia Turner,mia@example.com,23/Jan/2024,BASIC,29.99,UK,Active
+  18,Nick Young,nick@example.com,2024-01-23,Premium,49.99,United Kingdom,active
+  19,Olivia Park,olivia@example.com,January 24, 2024,premium,49.99,US,active
+  20,Peter Hall,peter@example.com,2024-01-25,Basic,29.99,United States,active
+  ```
+
+  Cleaning rules:
+  1. **Dates**: Normalise all dates to ISO 8601 format (YYYY-MM-DD). Handle all date formats present in the data. Rows with missing dates should have the field set to empty string.
+  2. **Missing values**: Treat "N/A", "null", "NULL", "-", and empty strings as missing. Represent missing values as empty string in output.
+  3. **Duplicates**: Remove exact duplicates after normalisation (rows 1, 6, and 11 should collapse to one row). Match on normalised name + normalised email.
+  4. **Name casing**: Title Case all names (e.g., "JOHN SMITH" -> "John Smith", "jane doe" -> "Jane Doe").
+  5. **Email**: Lowercase all email addresses. Rows with missing email should be kept but email field left empty.
+  6. **Plan**: Normalise to Title Case ("premium" -> "Premium", "BASIC" -> "Basic"). "Gold" is not a valid plan; flag or map it (map "Gold" to "Premium" with a note).
+  7. **Country**: Normalise country names: "US", "usa", "United States", "United states" all become "United States". "UK", "United Kingdom" become "United Kingdom". "canada", "Canada" become "Canada".
+  8. **Status**: Normalise to lowercase ("Active" -> "active", "ACTIVE" -> "active"). Missing status defaults to "unknown".
+  9. **Monthly spend**: Parse to float where possible. Leave missing values as empty string.
+
+  The script should also print a summary to stderr showing:
+  - Number of rows before and after cleaning
+  - Number of duplicates removed
+  - Number of missing values per column
+  - Any data quality warnings (e.g., invalid plan names found)
+
+  Provide only the Python code.
+temperature: 0.3
+max_output_tokens: 2048
+evaluation:
+  type: "data"
+  language: "python"
+  test_cases:
+    - description: "Script runs without errors on the provided data"
+    - description: "All dates normalised to YYYY-MM-DD format"
+    - description: "Duplicates removed (rows 1/6/11 collapsed)"
+    - description: "Names in Title Case"
+    - description: "Emails lowercased"
+    - description: "Countries normalised consistently"
+    - description: "Missing values represented as empty string"
+    - description: "Summary statistics printed to stderr"
+    - description: "Uses only standard library"

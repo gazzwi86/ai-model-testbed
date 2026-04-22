@@ -1,0 +1,95 @@
+category: data_analysis
+tier: hard
+name: "Multi-CSV correlation analysis"
+description: "Tests ability to analyse 3 related CSV datasets with foreign keys, find correlations, produce narrative with statistical caveats and visualisation recommendations"
+prompt: |
+  You are given three CSV datasets that share foreign key relationships. Analyse them and produce: (1) Python code for the analysis, (2) a written narrative of findings with statistical caveats, and (3) visualisation recommendations.
+
+  ## Dataset 1: customers.csv (500 rows)
+  ```
+  customer_id,signup_date,region,industry,company_size,acquisition_channel
+  C001,2023-03-15,North America,SaaS,50-200,Organic Search
+  C002,2023-03-18,Europe,FinTech,200-1000,Paid Ads
+  C003,2023-04-02,North America,Healthcare,10-50,Referral
+  ... (500 rows total - assume this data exists as a file)
+  ```
+  Fields: customer_id (PK), signup_date, region (North America/Europe/APAC/LATAM), industry (SaaS/FinTech/Healthcare/eCommerce/Manufacturing), company_size (1-10/10-50/50-200/200-1000/1000+), acquisition_channel (Organic Search/Paid Ads/Referral/Partner/Direct)
+
+  ## Dataset 2: subscriptions.csv (750 rows - some customers have multiple)
+  ```
+  subscription_id,customer_id,plan,start_date,end_date,mrr,status
+  S001,C001,Professional,2023-03-15,2024-03-15,299.00,active
+  S002,C002,Enterprise,2023-03-18,,899.00,active
+  S003,C001,Enterprise,2024-03-16,,599.00,active
+  ... (750 rows total - assume this data exists as a file)
+  ```
+  Fields: subscription_id (PK), customer_id (FK), plan (Starter/Professional/Enterprise), start_date, end_date (empty if active), mrr (monthly recurring revenue), status (active/churned/upgraded/downgraded)
+
+  ## Dataset 3: support_tickets.csv (2000 rows)
+  ```
+  ticket_id,customer_id,created_date,category,priority,resolution_hours,satisfaction_score
+  T001,C001,2023-04-10,Bug Report,High,4.5,4
+  T002,C003,2023-04-12,Feature Request,Low,48.0,3
+  T003,C002,2023-04-15,Billing,Medium,2.0,5
+  ... (2000 rows total - assume this data exists as a file)
+  ```
+  Fields: ticket_id (PK), customer_id (FK), created_date, category (Bug Report/Feature Request/Billing/Onboarding/Integration), priority (Low/Medium/High/Critical), resolution_hours, satisfaction_score (1-5)
+
+  ## Analysis Requirements
+
+  Write a Python script (using pandas, numpy, and scipy.stats) that:
+
+  1. **Joins the three datasets** on customer_id, handling the one-to-many relationships appropriately.
+
+  2. **Computes per-customer aggregate metrics:**
+     - Total lifetime MRR (sum of all subscription MRR * months active)
+     - Current plan (most recent subscription)
+     - Number of plan changes (upgrades + downgrades)
+     - Churn flag (any subscription with status='churned' and no subsequent active subscription)
+     - Total support tickets
+     - Average resolution time
+     - Average satisfaction score
+     - Ticket volume by category
+
+  3. **Finds correlations and patterns:**
+     - Correlation between support ticket volume and churn probability
+     - Correlation between average satisfaction score and plan tier
+     - Which acquisition channels have the highest/lowest churn rates
+     - Which industries have the highest lifetime value
+     - Whether company size correlates with support ticket volume
+     - Time-to-first-ticket after signup as a predictor of churn
+
+  4. **Statistical rigour:**
+     - Use appropriate statistical tests (chi-squared for categorical, Pearson/Spearman for continuous, point-biserial for binary-continuous)
+     - Report p-values and confidence intervals where applicable
+     - Flag correlations that are statistically significant but have small effect sizes
+     - Note where sample sizes may be too small for reliable inference
+     - Distinguish correlation from causation in the narrative
+
+  5. **Output a structured narrative** (printed to stdout) covering:
+     - Key findings (ranked by business impact)
+     - Statistical caveats and limitations
+     - Recommended visualisations with specific chart types, axes, and what each would show
+
+  The script should be robust: handle missing values, validate foreign key relationships (report orphaned records), and include comments explaining analytical choices.
+
+  Provide the complete Python code followed by an example of the narrative output you would expect.
+temperature: 0.3
+max_output_tokens: 6144
+evaluation:
+  type: "data"
+  language: "python"
+  dependencies:
+    - "pandas"
+    - "numpy"
+    - "scipy"
+  test_cases:
+    - description: "Code is syntactically valid and imports run"
+    - description: "Joins three datasets correctly on customer_id"
+    - description: "Computes per-customer aggregates (LTV, churn flag, ticket stats)"
+    - description: "Uses appropriate statistical tests with p-values"
+    - description: "Handles missing values and edge cases"
+    - description: "Reports correlations with effect sizes"
+    - description: "Narrative includes statistical caveats"
+    - description: "Visualisation recommendations are specific (chart type, axes, purpose)"
+    - description: "Validates foreign key integrity"

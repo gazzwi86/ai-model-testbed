@@ -1,0 +1,29 @@
+{
+  "_description": "Expected aggregate statistics for simple_data.json (generated with seed 42). Values are approximate targets -- benchmarks should allow a small tolerance for floating-point variation.",
+  "age": {
+    "mean": 40.5,
+    "median": 40.0,
+    "stddev": 12.5,
+    "null_count": 4,
+    "min": 18,
+    "max": 65
+  },
+  "salary": {
+    "mean": 75000.0,
+    "median": 74500.0,
+    "stddev": 20000.0,
+    "null_count": 3,
+    "min": 0,
+    "max": 500000
+  },
+  "name": {
+    "unique_count": 93,
+    "null_count": 3
+  },
+  "department": {
+    "unique_count": 5,
+    "values": ["Engineering", "Sales", "Marketing", "HR", "Finance"],
+    "null_count": 2
+  },
+  "_note": "Regenerate these expected values by running generate_fixtures.py and computing stats on the output. The values above are reference targets for the LLM benchmark evaluation."
+}

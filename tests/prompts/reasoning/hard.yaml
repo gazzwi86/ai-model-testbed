@@ -1,0 +1,120 @@
+category: reasoning
+tier: hard
+name: "Real-time fraud detection architecture"
+description: "Tests ability to design a multi-constraint data architecture for real-time fraud detection with specific performance, compliance, deployment, and budget requirements"
+prompt: |
+  You are a principal data architect consulting for a large payment processor. Design the data architecture for a real-time fraud detection system. Your design must satisfy ALL of the following constraints simultaneously -- this is a hard optimization problem, not a greenfield brainstorm.
+
+  ## System Requirements
+
+  ### Performance
+  - **Throughput**: 100,000 transactions/second sustained, 250,000/second peak (Black Friday)
+  - **Scoring latency**: p50 < 10ms, p99 < 50ms for fraud score computation
+  - **Feature computation**: Must compute features from a 30-day lookback window per cardholder (e.g., "number of transactions in last 24h", "average transaction amount in last 7 days", "number of distinct merchants in last 30 days")
+  - **Model update latency**: New model deployments must take effect within 5 minutes
+  - **Alert latency**: Suspicious transaction alerts must reach the fraud operations team within 2 seconds
+
+  ### Data Requirements
+  - **Transaction schema**: card_hash, merchant_id, amount, currency, timestamp, geo_location, device_fingerprint, is_card_present, mcc_code, plus 20+ additional fields
+  - **Feature store**: Must maintain per-cardholder aggregated features (rolling windows: 1h, 6h, 24h, 7d, 30d) updated in real-time
+  - **Historical data**: 2 years of transaction history (~6 trillion records) for model training
+  - **Reference data**: Merchant risk scores, BIN tables, geo risk scores, known fraud patterns
+
+  ### Compliance (non-negotiable)
+  - **GDPR Article 17**: Right to erasure -- must be able to delete all data for a specific cardholder within 72 hours, across ALL stores (streaming, feature store, historical, model training data, logs)
+  - **PCI DSS Level 1**: No plaintext PANs in any data store. Tokenization or irreversible hashing required. Audit trail for all access to cardholder data.
+  - **Data residency**: EU cardholder data must be processed and stored in EU regions. US data in US regions. Other regions can be processed in either.
+
+  ### Deployment
+  - **Multi-region active-active**: Transactions must be scored in the region where they originate (EU transactions scored in EU, US in US)
+  - **Cross-region consistency**: A cardholder's feature state must be consistent across regions within 500ms (eventual consistency acceptable)
+  - **Availability**: 99.99% uptime SLA (52.6 minutes/year max downtime)
+  - **Failover**: If one region fails, the other must absorb full traffic within 30 seconds with degraded but functional scoring
+
+  ### Budget
+  - **Infrastructure budget**: $50,000/month total across all regions
+  - **Headcount**: 4 data engineers, 2 ML engineers, 1 SRE (this is the team you have, not a wishlist)
+  - **Timeline**: MVP scoring 80% of traffic within 4 months, full deployment within 8 months
+
+  ## Your Task
+
+  Produce a detailed architecture design covering:
+
+  ### 1. Stream Processing Pipeline
+  Compare and choose between:
+  - Apache Kafka + Apache Flink
+  - Apache Kafka + Kafka Streams
+  - Amazon Kinesis + AWS Lambda
+  - Apache Pulsar + custom consumers
+  Justify your choice based on the specific constraints above. Specify partition strategy, consumer group topology, and exactly-once semantics approach.
+
+  ### 2. Feature Store Architecture
+  Design the real-time feature store that maintains per-cardholder aggregates. Address:
+  - Storage engine choice (Redis, Apache Druid, ScyllaDB, DynamoDB, custom) with justification
+  - How rolling window aggregates are computed and updated incrementally
+  - Memory/storage estimates for 500M unique cardholders with 5 rolling windows x 15 features
+  - How cross-region consistency is maintained within the 500ms window
+  - How GDPR erasure propagates through the feature store
+
+  ### 3. Model Serving
+  - Online scoring architecture: how a transaction goes from ingestion to scored in <50ms
+  - Model format and serving infrastructure (ONNX, TensorFlow Serving, custom, etc.)
+  - A/B testing and shadow scoring for new models
+  - Feature engineering: how raw transaction features are joined with stored features at scoring time
+  - Fallback scoring if the ML model is unavailable
+
+  ### 4. Historical Data & Training Pipeline
+  - Storage for 6T records (format, partitioning, compression)
+  - How training data is extracted without impacting the real-time pipeline
+  - How GDPR erasure is handled in historical data (immutable storage challenge)
+
+  ### 5. Data Flow Diagram
+  Provide a text-based data flow diagram showing the complete path of a transaction from ingestion through scoring, storage, and alerting. Include all systems, data stores, and network boundaries.
+
+  ### 6. Capacity Estimates
+  For each major component, provide:
+  - CPU/memory/storage requirements
+  - Estimated monthly cost (sum must be <= $50K)
+  - Scaling bottleneck and mitigation
+
+  ### 7. Failure Mode Analysis
+  Identify the top 5 failure scenarios and for each:
+  - Trigger condition
+  - Blast radius (what breaks)
+  - Detection mechanism
+  - Recovery procedure
+  - RTO/RPO
+
+  ### 8. GDPR Erasure Procedure
+  Step-by-step procedure for erasing a cardholder's data across ALL stores within 72 hours. Address the fundamental tension between immutable event logs and the right to erasure.
+
+  Be specific about technology choices, version numbers where relevant, and configuration details. Generic architectures that ignore the constraints will be considered failures. If any constraint creates a genuine tension with another constraint, call it out explicitly and explain the trade-off you are making.
+temperature: 0.7
+max_output_tokens: 8192
+evaluation:
+  type: "reasoning"
+  criteria:
+    - name: "constraint_satisfaction"
+      description: "Design demonstrably addresses ALL constraints: 100K TPS, 50ms p99, 30-day lookback, GDPR erasure, PCI DSS, multi-region active-active, $50K budget, 7-person team. Does not hand-wave or ignore any constraint."
+      weight: 0.20
+    - name: "technology_justification"
+      description: "Technology choices are justified against alternatives with specific reasons tied to the constraints. Not just listing popular tools."
+      weight: 0.15
+    - name: "feature_store_design"
+      description: "Feature store design addresses rolling window computation, memory estimates, cross-region consistency, and erasure propagation with technical specificity."
+      weight: 0.15
+    - name: "capacity_estimates"
+      description: "Capacity estimates are realistic and sum to <= $50K/month. Shows understanding of actual infrastructure costs."
+      weight: 0.15
+    - name: "gdpr_erasure"
+      description: "GDPR erasure procedure is technically feasible and addresses the immutable log tension. Not hand-waved as 'just delete it'."
+      weight: 0.10
+    - name: "failure_analysis"
+      description: "Failure modes are realistic, include blast radius and recovery, and cover the most likely actual failure scenarios for this architecture."
+      weight: 0.10
+    - name: "data_flow_clarity"
+      description: "Data flow diagram is clear, complete, and shows the full transaction lifecycle including region boundaries."
+      weight: 0.05
+    - name: "trade_off_honesty"
+      description: "Acknowledges genuine tensions between constraints (e.g., budget vs. multi-region, latency vs. consistency, immutability vs. erasure) and explains trade-offs rather than pretending they don't exist."
+      weight: 0.10

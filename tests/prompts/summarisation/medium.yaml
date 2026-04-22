@@ -1,0 +1,116 @@
+category: summarisation
+tier: medium
+name: "Architecture document summary"
+description: "Tests ability to summarise a 4,000-word technical architecture document while preserving decisions, alternatives considered, trade-offs, and risks"
+prompt: |
+  Summarise the following technical architecture document in 400-600 words. Your summary must preserve: (1) all architectural decisions and their rationale, (2) alternatives that were considered and why they were rejected, (3) key trade-offs acknowledged, and (4) identified risks and mitigations.
+
+  ---
+
+  # Platform Event Bus Architecture Decision Record
+
+  **Status:** Accepted | **Date:** 2026-02-20 | **Authors:** Platform Engineering Team
+
+  ## Context
+
+  Our platform currently processes approximately 2.3 million events per day across 14 microservices. Events are transmitted via synchronous HTTP calls between services, resulting in tight coupling, cascading failures, and difficulty scaling individual services independently. In Q4 2025, we experienced three major incidents where a single slow downstream service caused request timeouts that propagated through the entire call chain, resulting in a total of 47 minutes of customer-facing downtime.
+
+  The current architecture also makes it difficult to add new consumers of existing events. For example, when the analytics team needed access to order events, it required changes to the order service, a coordinated deployment, and two sprints of engineering effort. We need a solution that decouples producers from consumers and provides resilience against downstream failures.
+
+  Our requirements are: (1) support at least 5 million events/day with headroom to 20M, (2) guarantee at-least-once delivery, (3) support event replay for new consumers, (4) maintain event ordering within a partition key (e.g., per customer), (5) achieve less than 500ms p99 end-to-end latency for critical events, (6) integrate with our existing Kubernetes infrastructure, and (7) total cost of ownership under $8,000/month at current volume.
+
+  ## Options Considered
+
+  ### Option A: Apache Kafka (self-managed on Kubernetes)
+
+  Kafka provides high throughput, strong ordering guarantees, log-based retention enabling replay, and a mature ecosystem. We evaluated running a 5-broker cluster on our existing Kubernetes infrastructure using Strimzi operator. Estimated cost: ~$4,200/month (compute + storage). The team has limited Kafka operational experience (one engineer has production experience). Kafka requires significant operational investment: ZooKeeper management (or KRaft migration), partition rebalancing, schema registry, and monitoring. Estimated ramp-up time: 6-8 weeks.
+
+  ### Option B: AWS MSK Serverless
+
+  Managed Kafka eliminates operational burden. Pricing is consumption-based: estimated $5,800/month at current volume, scaling linearly. However, MSK Serverless has limitations: no support for compacted topics (needed for our configuration change events), maximum message size of 8MB (we have some batch events at 12MB), and it locks us into AWS (we currently maintain multi-cloud optionality for contractual reasons with two enterprise clients).
+
+  ### Option C: NATS JetStream
+
+  NATS JetStream is lightweight, Kubernetes-native, and provides at-least-once delivery with replay. Our team evaluated it in a two-week spike. Performance testing showed it handling 15,000 msgs/sec on a 3-node cluster (sufficient headroom). Estimated cost: ~$2,100/month. NATS has a smaller ecosystem than Kafka but covers our requirements. The team found the operational model significantly simpler: no ZooKeeper, built-in clustering, straightforward configuration. Consumer groups, exactly-once processing patterns, and dead letter queues are supported. The primary concern is community size and long-term viability compared to Kafka.
+
+  ### Option D: RabbitMQ with Streams
+
+  RabbitMQ Streams (added in 3.9) provides log-based messaging similar to Kafka. However, our benchmarks showed performance degradation above 8,000 msgs/sec with durable streams, which is below our headroom requirement. RabbitMQ's stream implementation is also less mature than its classic queue model, and the team had concerns about the reliability of the streams plugin based on GitHub issue volume. Estimated cost: ~$3,100/month.
+
+  ### Option E: Cloud Pub/Sub (GCP) or EventBridge (AWS)
+
+  Fully managed options eliminate operational burden entirely. However, both create hard cloud-provider lock-in. GCP Pub/Sub pricing estimated at $6,400/month at current volume. AWS EventBridge lacks log-based replay and has a 256KB message size limit. Neither meets our multi-cloud requirement.
+
+  ## Decision
+
+  We are adopting **NATS JetStream** as our event bus platform.
+
+  ### Rationale
+
+  1. **Operational simplicity:** The team's primary constraint is operational capacity, not development velocity. NATS JetStream's operational model is dramatically simpler than Kafka. A single binary, built-in clustering with Raft consensus, no external dependencies (no ZooKeeper/KRaft), and straightforward configuration reduce the ongoing operational burden.
+
+  2. **Performance headroom:** Our spike demonstrated 15,000 msgs/sec sustained throughput on a modest 3-node cluster, providing approximately 6x headroom over current peak load (~2,500 msgs/sec). This is sufficient for our 3-year growth projection.
+
+  3. **Cost:** At $2,100/month, NATS JetStream is roughly half the cost of Kafka and one-third the cost of managed cloud alternatives. This leaves budget for investing in observability and testing.
+
+  4. **Kubernetes-native:** NATS deploys naturally on Kubernetes via Helm chart, integrating with our existing infrastructure, monitoring (Prometheus metrics), and deployment pipelines.
+
+  5. **Multi-cloud compatibility:** NATS is infrastructure-agnostic, preserving our multi-cloud optionality.
+
+  ### Why Not Kafka
+
+  Despite Kafka's maturity and ecosystem advantages, the operational complexity is disproportionate to our team's size (4 platform engineers) and current needs. The risk of operational incidents from managing Kafka outweighs the ecosystem benefits. If our event volume grows beyond NATS's practical limits (estimated at 50M+ events/day with our message sizes), we would revisit Kafka with dedicated operational staffing.
+
+  ## Trade-offs Acknowledged
+
+  1. **Ecosystem maturity:** NATS's ecosystem is smaller than Kafka's. Fewer third-party integrations, connectors, and tooling exist. We will need to build some custom integrations (estimated: 3-4 weeks of engineering effort for Elasticsearch and data warehouse connectors).
+
+  2. **Community and talent pool:** Hiring engineers with NATS experience is harder than Kafka experience. We mitigate this by investing in internal documentation and training.
+
+  3. **Schema management:** NATS lacks a built-in schema registry. We will implement schema validation at the application layer using JSON Schema, with a shared schema library. This is additional development effort but gives us more control.
+
+  4. **Exactly-once semantics:** NATS JetStream provides at-least-once delivery. For the three workflows requiring exactly-once processing (payment processing, inventory updates, billing events), we will implement idempotency at the consumer level using deduplication keys stored in Redis.
+
+  ## Risks and Mitigations
+
+  | Risk | Likelihood | Impact | Mitigation |
+  |------|-----------|--------|------------|
+  | NATS project loses maintainer momentum | Low | High | Monitor GitHub activity quarterly. Kafka migration playbook maintained as contingency. |
+  | Performance ceiling hit earlier than projected | Medium | Medium | Load test quarterly with projected volumes. Alert at 60% capacity threshold. |
+  | Message loss during node failure | Low | High | Configure R=3 replication. Implement end-to-end delivery verification for critical events. |
+  | Team struggles with custom connector development | Medium | Low | Allocate 20% buffer in Q2 sprint planning. Engage NATS consulting if needed. |
+  | Consumer idempotency implementation has bugs | Medium | High | Extensive testing with chaos engineering. Payment flows get additional manual verification for first 30 days. |
+
+  ## Implementation Plan
+
+  Phase 1 (Weeks 1-3): Deploy NATS cluster, set up monitoring, migrate notification events (lowest risk).
+  Phase 2 (Weeks 4-6): Migrate order events, implement idempotent consumers for payment flow.
+  Phase 3 (Weeks 7-9): Migrate remaining services, decommission synchronous HTTP event calls.
+  Phase 4 (Week 10): Performance validation, documentation, team training.
+
+  ## Success Metrics
+
+  - Zero event loss over 30-day validation period
+  - p99 end-to-end latency < 200ms (better than 500ms requirement)
+  - Time to add new event consumer < 1 day (down from 2 sprints)
+  - Zero cascading failures attributable to event bus
+  - Operational incidents related to event bus < 1 per quarter
+temperature: 0.7
+max_output_tokens: 1024
+evaluation:
+  type: "summary"
+  criteria:
+    - name: "decisions_preserved"
+      description: "Must state NATS JetStream was chosen and the key reasons (operational simplicity, cost, Kubernetes-native, multi-cloud)"
+      weight: 0.25
+    - name: "alternatives_covered"
+      description: "Must mention at least 3 of the 5 alternatives and why they were rejected (Kafka operational complexity, MSK limitations, RabbitMQ perf, cloud lock-in)"
+      weight: 0.25
+    - name: "tradeoffs_preserved"
+      description: "Must mention at least 3 trade-offs: smaller ecosystem, talent pool, no schema registry, at-least-once vs exactly-once"
+      weight: 0.25
+    - name: "risks_preserved"
+      description: "Must mention at least 3 risks and their mitigations"
+      weight: 0.25
+  word_count_min: 400
+  word_count_max: 600

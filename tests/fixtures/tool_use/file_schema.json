@@ -1,0 +1,176 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "File Operations and Test Runner API",
+    "version": "1.0.0",
+    "description": "Tools for reading files and running test suites in a project."
+  },
+  "servers": [
+    {
+      "url": "local://filesystem"
+    }
+  ],
+  "paths": {
+    "/read_file": {
+      "post": {
+        "operationId": "read_file",
+        "summary": "Read the contents of a file",
+        "description": "Reads and returns the full text content of a file at the given path. Supports any text-based file format.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Absolute or relative path to the file to read. Relative paths are resolved from the project root."
+                  },
+                  "encoding": {
+                    "type": "string",
+                    "description": "Character encoding to use when reading the file.",
+                    "default": "utf-8",
+                    "enum": ["utf-8", "ascii", "latin-1"]
+                  }
+                },
+                "required": ["path"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "File contents returned successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "The resolved absolute path to the file"
+                    },
+                    "content": {
+                      "type": "string",
+                      "description": "The full text content of the file"
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "description": "File size in bytes"
+                    },
+                    "line_count": {
+                      "type": "integer",
+                      "description": "Number of lines in the file"
+                    }
+                  },
+                  "required": ["path", "content"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File not found at the specified path"
+          },
+          "403": {
+            "description": "Permission denied"
+          }
+        }
+      }
+    },
+    "/run_tests": {
+      "post": {
+        "operationId": "run_tests",
+        "summary": "Run the test suite for a project",
+        "description": "Executes the test suite (pytest) for the project at the given path and returns the results including pass/fail status, output, and failure details.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the project root or specific test file/directory to run."
+                  },
+                  "verbose": {
+                    "type": "boolean",
+                    "description": "Whether to include verbose test output.",
+                    "default": false
+                  }
+                },
+                "required": ["path"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Test run completed (regardless of pass/fail)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "passed": {
+                      "type": "integer",
+                      "description": "Number of tests that passed"
+                    },
+                    "failed": {
+                      "type": "integer",
+                      "description": "Number of tests that failed"
+                    },
+                    "errors": {
+                      "type": "integer",
+                      "description": "Number of tests that errored"
+                    },
+                    "skipped": {
+                      "type": "integer",
+                      "description": "Number of tests that were skipped"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "description": "Total number of tests discovered"
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "description": "True if all tests passed with no errors"
+                    },
+                    "output": {
+                      "type": "string",
+                      "description": "Full stdout/stderr output from the test runner"
+                    },
+                    "failures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "test_name": {
+                            "type": "string",
+                            "description": "Fully qualified name of the failing test"
+                          },
+                          "message": {
+                            "type": "string",
+                            "description": "Failure message or assertion error"
+                          },
+                          "traceback": {
+                            "type": "string",
+                            "description": "Full traceback for the failure"
+                          }
+                        },
+                        "required": ["test_name", "message"]
+                      },
+                      "description": "Details of each failed test"
+                    }
+                  },
+                  "required": ["passed", "failed", "total", "success", "output"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
